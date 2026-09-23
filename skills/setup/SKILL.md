@@ -1,6 +1,6 @@
 ---
 name: setup
-description: 現在のディレクトリのリポジトリをSiriusへ登録する、またはグローバル設定を作る。~/.sirius/config.yamlと~/.sirius/repos/<owner>__<repo>.yamlを対話的に書き、オペレーターにしかできない作業（権限、レビュー用アカウント、ルールセット、スケジューラ）のチェックリストを表示する。/sirius:setupに使う。
+description: 現在のディレクトリのリポジトリをSiriusへ登録する、またはグローバル設定を作る。~/.sirius/config.yamlと~/.sirius/repos/<owner>__<repo>.yamlを対話的に書き、オペレーターにしかできない作業（権限、スケジューラ）のチェックリストを表示する。merge: autoは別GitHubアカウントを使わず、実装役とは別モデルの独立検証をゲートにする。/sirius:setupに使う。
 disable-model-invocation: true
 ---
 
