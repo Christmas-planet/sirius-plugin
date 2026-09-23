@@ -6,6 +6,12 @@ version: 1
 implementer: claude
 reviewer: codex
 
+# 任意。ワーカー・レビュワー起動時に渡すモデル名と推論努力度（省略可、空文字なら未指定）。
+implementer_model: ""
+implementer_effort: ""
+reviewer_model: ""
+reviewer_effort: ""
+
 # 上限。個々のリポジトリはこれより厳しくできるが、緩くはできない。
 implement_gate: human   # human | auto
 merge: manual           # manual | auto

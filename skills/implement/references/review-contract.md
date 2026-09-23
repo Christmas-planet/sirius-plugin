@@ -6,8 +6,8 @@
 
 ## コマンドの形
 
-- `codex`: チェックアウトから `codex exec --sandbox read-only "<review-prompt> Review the diff of origin/<verified-base-branch>...HEAD in this checkout."`。`codex review --base` とプロンプトの組み合わせは使わない: CLIがその組み合わせを拒否する。
-- `claude`: チェックアウトで、下のプロンプトとbaseとの差分を渡して新しいClaudeサブエージェントを起動する。実装役のコンテキストを再利用してはならない。
+- `codex`: チェックアウトから `codex exec --sandbox read-only "<review-prompt> Review the diff of origin/<verified-base-branch>...HEAD in this checkout."`。`codex review --base` とプロンプトの組み合わせは使わない: CLIがその組み合わせを拒否する。`review.model` / `review.effort` が設定されていれば、`--model <review.model>` と `-c model_reasoning_effort="<review.effort>"` を付ける。
+- `claude`: チェックアウトで、下のプロンプトとbaseとの差分を渡して新しいClaudeサブエージェントを起動する。実装役のコンテキストを再利用してはならない。`review.model` / `review.effort` が設定されていれば、そのモデル・推論努力度でサブエージェントを起動する。
 
 パスごとに新しいレビュワーを使う。前のレビュワーのセッションを再開しない。安全でないサンドボックスや承認バイパスを有効にしない。
 

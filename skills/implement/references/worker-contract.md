@@ -17,6 +17,7 @@
 - リポジトリの `implement.conventions`（PR本文の書式やコミットの決まりなど）
 - リポジトリの `forbidden`（このリポジトリで絶対にしてはいけないことの一覧）
 - リポジトリの `verify.commands` / `verify.live` / `verify.not_enough`
+- `implement.model` / `implement.effort`（設定されていれば、ワーカーを起動するときのモデルと推論努力度）
 
 ## ワーカー向けプロンプト
 

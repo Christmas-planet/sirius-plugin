@@ -44,7 +44,7 @@ phaseの最初に、すでにmarkerが付いているIssueを見る。ブラン�
 
 ワーカーを起動する前に[worker-contract.md](references/worker-contract.md)を読む。各ワーカーには1つのIssueと専用のworktreeを与える。worktreeは `~/.sirius/worktrees/<repo>/<branch>` の下に、現在のリモートのデフォルトブランチから作る。ユーザー自身のチェックアウトを再利用したり、そのコミットされていない変更をコピーしたりしない。
 
-実行できる層のワーカーは、すべて1バッチで起動する。設定された `implementer`（`claude` ならサブエージェント、`codex` ならworktree内の `codex exec`）を使う。ワーカーは実装・検証・push・draft PR作成を行う。レビュー、readyへの変更、タイトル変更、マージはしない。
+実行できる層のワーカーは、すべて1バッチで起動する。設定された `implementer`（`claude` ならサブエージェント、`codex` ならworktree内の `codex exec`）を使う。`implement.model` / `implement.effort` が設定されていれば、ワーカー起動時のモデル指定・推論努力度（`claude` サブエージェントなら `model`、`codex exec` なら `--model` / `-c model_reasoning_effort=`）にそのまま渡す。ワーカーは実装・検証・push・draft PR作成を行う。レビュー、readyへの変更、タイトル変更、マージはしない。
 
 ワーカーへ渡すときは、そのリポジトリの `investigate.read_first`、`investigate.knowledge`、`implement.conventions`、`forbidden`、`verify.commands`、`verify.live`、`verify.not_enough` を必ず添える。これらはworker-contractのプロンプトに差し込む値であり、省略しない。
 

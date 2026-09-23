@@ -34,7 +34,11 @@ GLOBAL_DEFAULTS = {
     "version": 1,
     "scheduler": "none",
     "implementer": "claude",
+    "implementer_model": "",
+    "implementer_effort": "",
     "reviewer": "codex",
+    "reviewer_model": "",
+    "reviewer_effort": "",
     "implement_gate": "human",
     "merge": "manual",
     "reply": {"mode": "draft"},
@@ -103,6 +107,9 @@ def load_global():
             errors.append(f"{path}: {key} must be one of {allowed}")
     if cfg["reply"].get("mode") not in REPLY_MODES:
         errors.append(f"{path}: reply.mode must be one of {REPLY_MODES}")
+    for key in ("implementer_model", "implementer_effort", "reviewer_model", "reviewer_effort"):
+        if not isinstance(cfg.get(key, ""), str):
+            errors.append(f"{path}: {key} must be a string")
     if errors:
         raise ConfigError("\n".join(errors))
     return cfg
@@ -325,10 +332,14 @@ def resolve(glob, path, data):
         "implement": {
             "gate": gate,
             "conventions": implement.get("conventions") or [],
+            "model": glob["implementer_model"],
+            "effort": glob["implementer_effort"],
         },
         "review": {
             "reviewer": review.get("reviewer") or glob["reviewer"],
             "focus": review.get("focus") or [],
+            "model": glob["reviewer_model"],
+            "effort": glob["reviewer_effort"],
         },
         "verify": {
             "commands": verify.get("commands") or [],
