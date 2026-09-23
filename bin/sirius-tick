@@ -2,6 +2,7 @@
 # One scheduled Sirius run, for launchd (StartInterval, no KeepAlive).
 # /sirius:setup copies this file to ~/.sirius/bin/sirius-tick so the launchd job
 # does not point into the versioned plugin cache.
+# --chrome: Slack replies are sent by driving Slack's web app through Claude in Chrome.
 # Exits quietly when stopped or when another run holds the lease, and notifies
 # the user when a run fails or ends blocked on a human decision.
 set -u
@@ -26,7 +27,7 @@ scrub=(/usr/bin/env -u ANTHROPIC_BASE_URL -u ANTHROPIC_MODEL -u ANTHROPIC_DEFAUL
        -u ANTHROPIC_DEFAULT_SONNET_MODEL -u ANTHROPIC_DEFAULT_OPUS_MODEL)
 [[ "${SIRIUS_TICK_KEEP_ENV:-0}" == 1 ]] && scrub=()
 
-(cd "$SIRIUS_HOME" && "${scrub[@]}" "$CLAUDE_BIN" -p "/sirius:run" \
+(cd "$SIRIUS_HOME" && "${scrub[@]}" "$CLAUDE_BIN" -p "/sirius:run" --chrome \
    --model "${SIRIUS_MODEL:-opus}" --effort "${SIRIUS_EFFORT:-high}" \
    --permission-mode auto --output-format json) >"$out" 2>&1
 code=$?
