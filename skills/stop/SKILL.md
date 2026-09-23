@@ -10,7 +10,7 @@ argument-hint: "[resume]"
 引数なしのとき:
 
 1. `touch ~/.sirius/STOP`。まずこれを、他の何よりも先に行う。
-2. `sirius-lease status --scope run` を表示する。すでに進行中の実行は、今のステップを終わらせてから止まる。このファイルがある間、`sirius-merge` はすべてのマージを拒否し、次の実行は直ちに終了する。
+2. `sirius-config show` にあるリポジトリごとに `sirius-lease status --scope repo:<owner/repo>` を、加えて `sirius-lease status --scope line` を表示する。すでに進行中の実行は、今のステップを終わらせてから止まる。このファイルがある間、`sirius-merge` はすべてのマージを拒否し、次の実行は直ちに終了する。
 3. スケジューラが `launchd` なら、完全に止めるために `launchctl bootout gui/$(id -u)/ai.sirius.tick` もユーザーに伝える。
 
 `resume` のとき:

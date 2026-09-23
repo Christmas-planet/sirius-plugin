@@ -269,7 +269,11 @@ def resolve(glob, path, data):
     merge_mode = stricter(MERGE_MODES, glob["merge"], declared_merge_mode)
     if merge_mode != declared_merge_mode:
         notes.append(f"merge capped at {merge_mode!r} by config.yaml")
-    if merge_mode == "auto" and glob["implementer"] == glob["reviewer"]:
+    # The repo's own review.reviewer overrides the global reviewer (same fallback the
+    # resolved "review" block below uses), so the "different model" check must compare
+    # against the model that will actually review this repo, not always the global one.
+    effective_reviewer = (data.get("review") or {}).get("reviewer") or glob["reviewer"]
+    if merge_mode == "auto" and glob["implementer"] == effective_reviewer:
         merge_mode = "manual"
         notes.append("merge auto needs a reviewer model different from the implementer; using 'manual'")
     ids = glob.get("identities") or {}

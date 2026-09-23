@@ -1,6 +1,6 @@
 # レビュー契約
 
-実装役とレビュー役は `~/.sirius/config.yaml` の `implementer` と `reviewer`（`claude` か `codex`）で決まるが、対象リポジトリの `review.reviewer` が設定されていれば、そのリポジトリではそちらを使う（`sirius-config repo <owner/repo>` の解決結果を見る。空ならグローバルの `reviewer` にフォールバックする）。`merge.mode: auto` は実装役とレビュー役が別モデルであることを要求し、同じモデルなら `sirius-config` が `manual` にフォールバックする。
+実装役とレビュー役は `~/.sirius/config.yaml` の `implementer` と `reviewer`（`claude` か `codex`）で決まるが、対象リポジトリの `review.reviewer` が設定されていれば、そのリポジトリではそちらを使う（`sirius-config repo <owner/repo>` の解決結果を見る。空ならグローバルの `reviewer` にフォールバックする）。`merge.mode: auto` は実装役とレビュー役が別モデルであることを要求し、`sirius-config` はこの判定にも `review.reviewer`（設定されていればそちら、無ければグローバルの `reviewer`）を使う。実装役と同じモデルになる組み合わせなら `manual` にフォールバックする。
 
 レビューは毎回、baseを取得してから、pushされたpull requestのheadを正確にcheckoutした、独立したIssueのチェックアウトから実行する。
 

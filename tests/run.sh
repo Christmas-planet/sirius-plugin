@@ -24,6 +24,11 @@ check "auto without reviewer identity falls back" '
 check "same implementer and reviewer falls back" '
   sed -i "" "s/^reviewer: codex/reviewer: claude/" "$SIRIUS_HOME/config.yaml"
   bin/sirius-config repo acme/my-repo | grep -q "different from the implementer"'
+check "repo review.reviewer overriding the global reviewer is checked against the implementer too" '
+  sed -i "" "s/^reviewer: claude/reviewer: codex/" "$SIRIUS_HOME/config.yaml"
+  sed "s#repo: acme/my-repo#repo: acme/samereviewer#; s/^  reviewer: \"\"/  reviewer: claude/; s/^  mode: manual/  mode: auto/" templates/repo.yaml > "$SIRIUS_HOME/repos/acme__samereviewer.yaml"
+  bin/sirius-config repo acme/samereviewer | grep -q "different from the implementer"'
+rm -f "$SIRIUS_HOME/repos/acme__samereviewer.yaml"
 check "needs_review forces human gate, manual merge, and draft reply" '
   sed -i "" "s/^needs_review: false/needs_review: true/" "$SIRIUS_HOME/repos/acme__my-repo.yaml"
   out=$(bin/sirius-config repo acme/my-repo)
@@ -35,11 +40,11 @@ check "reply send is capped to draft by config.yaml default" '
   bin/sirius-config repo acme/replytest | grep -q "reply capped at .draft. by config.yaml"'
 rm -f "$SIRIUS_HOME/repos/acme__replytest.yaml"
 check "reply send allowed when config.yaml also allows send" '
-  print "reply: {mode: send}" >> "$SIRIUS_HOME/config.yaml"
+  sed -i "" "s/^reply: {mode: draft}/reply: {mode: send}/" "$SIRIUS_HOME/config.yaml"
   sed "s#repo: acme/my-repo#repo: acme/sendtest#; s/^  mode: draft/  mode: send/" templates/repo.yaml > "$SIRIUS_HOME/repos/acme__sendtest.yaml"
   [[ $(bin/sirius-config repo acme/sendtest | jget reply.mode) == send ]]'
 rm -f "$SIRIUS_HOME/repos/acme__sendtest.yaml"
-sed -i "" "/^reply: {mode: send}/d" "$SIRIUS_HOME/config.yaml"
+sed -i "" "s/^reply: {mode: send}/reply: {mode: draft}/" "$SIRIUS_HOME/config.yaml"
 check "wildcard source rejected" '
   sed "s#repo: acme/my-repo#repo: acme/bad#; s/C0123456789/C*/" templates/repo.yaml > "$SIRIUS_HOME/repos/acme__bad.yaml"
   ! bin/sirius-config validate >/dev/null'

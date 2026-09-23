@@ -10,7 +10,7 @@
 
 ## チェックポイント
 
-ソースごとに1つのチェックポイントを `~/.sirius/state/intake/<source>-<repo>.json` に保存する:
+ソースごとに1つのチェックポイントを `~/.sirius/state/intake/<source>-<owner>__<repo>.json` に保存する（`<owner>__<repo>` は設定ファイル名と同じ符号化: `owner/repo` を小文字化し `/` を `__` に置き換えたもの）:
 
 ```yaml
 monitor_state: idle | scanning | awaiting_confirmation
@@ -84,10 +84,12 @@ decision:
 
 ## 返信について
 
-各ソースの `reply.mode`（Slack/LINE の実際の返信先ごとに `sirius-config repo` から得られる）に従う:
+取り込みフェーズは読み取り専用であり（このファイル冒頭の「範囲」の通り、メッセージは「返信を送ったりすることはできない」）、`reply.mode` の値にかかわらず、intake-slack と intake-line は絶対に何も送信しない。実際に送信する経路は今のところどこにも実装されていない。
 
-- `draft`: 送信はせず、提案する返信文を Issue かこの実行のレポートに書く。LINE には下書き API がないので、`draft` は「LINE アプリを操作して送信しない」ことを意味する。
-- `send`: Slack は `slack_send_message_draft`（利用できれば）または実送信ツールで送る。LINE には送信の経路がないので、`send` が設定されていても実際には Issue/レポートへの記載に留める。
+各ソースの `reply.mode`（`sirius-config repo` から得られる）は、提案する返信文をどこに残すかだけを決める:
+
+- `draft`: 提案する返信文を Issue かこの実行のレポートに書く。Slackでは、利用できるなら `slack_send_message_draft` で下書きを作ってもよい（下書きの作成であって送信ではない）。LINE には下書きの仕組みがないので、常に文面をIssue/レポートへ書くだけにする。
+- `send`: 現時点では送信を行うステップがどこにもないため、`draft` と同じ扱いにする（提案文をIssue/レポートに書く）。実行レポートに「reply.mode は send だが、送信する経路がまだ実装されていない」と明記する。
 
 いずれの場合も、返信そのものは `create-issue` が書く Issue 本文とは別に、パケットの中で `required_action` とは区別して扱う。
 
