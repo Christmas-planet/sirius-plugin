@@ -1,19 +1,19 @@
 ---
 name: stop
-description: Stop Sirius immediately by creating ~/.sirius/STOP, which blocks every run and every merge; with the argument "resume", remove it. Use for /sirius:stop or whenever the user says to stop Sirius.
+description: ~/.sirius/STOPを作ってSiriusを直ちに止める。これがあるとすべての実行とすべてのマージが止まる。引数"resume"を付けると削除する。/sirius:stop、またはユーザーがSiriusを止めるよう言ったときに使う。
 disable-model-invocation: true
 argument-hint: "[resume]"
 ---
 
-# Stop Sirius
+# Siriusを止める
 
-Without an argument:
+引数なしのとき:
 
-1. `touch ~/.sirius/STOP`. Do this first, before anything else.
-2. Show `sirius-lease status`. A run already in progress finishes its current step. `sirius-merge` refuses every merge while the file exists, and the next run ends immediately.
-3. If the scheduler is `launchd`, also tell the user `launchctl bootout gui/$(id -u)/ai.sirius.tick` for a full stop.
+1. `touch ~/.sirius/STOP`。まずこれを、他の何よりも先に行う。
+2. `sirius-lease status --scope run` を表示する。すでに進行中の実行は、今のステップを終わらせてから止まる。このファイルがある間、`sirius-merge` はすべてのマージを拒否し、次の実行は直ちに終了する。
+3. スケジューラが `launchd` なら、完全に止めるために `launchctl bootout gui/$(id -u)/ai.sirius.tick` もユーザーに伝える。
 
-With `resume`:
+`resume` のとき:
 
-1. Show `sirius-config validate`. If it reports errors, say that the next run will stop on them.
-2. Ask the user to confirm, then `rm ~/.sirius/STOP`.
+1. `sirius-config validate` を表示する。エラーがあれば、次の実行はそこで止まると伝える。
+2. ユーザーに確認してから `rm ~/.sirius/STOP` する。

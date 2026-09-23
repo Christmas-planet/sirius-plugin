@@ -1,53 +1,57 @@
 ---
 name: run
-description: Run one Sirius cycle - merge ready PRs, resume pending confirmations, read the configured Slack and LINE sources into GitHub Issues, and implement eligible Issues - using the per-project settings in ~/.sirius. Use for /sirius:run, a /loop of it, or a scheduled run.
+description: Siriusの1サイクルを実行する - readyなPRのマージ、保留中の確認の再開、設定されたSlack/LINEソースの取り込みからGitHub Issueへの変換、対応可能なIssueの実装を、~/.sirius内のリポジトリごとの設定に従って行う。/sirius:run、そのloop実行、スケジュール実行に使う。
 ---
 
 # Sirius run
 
-Coordinate one bounded cycle. Component skills do the work: `merge`, `intake-slack`, `intake-line`, `create-issue`, and `implement`. The plugin's `bin/` is on PATH while the plugin is enabled, so call `sirius-config`, `sirius-lease`, and `sirius-merge` by name.
+1回分の範囲を決めて動かす。実際の作業は構成スキル（`merge`、`intake-slack`、`intake-line`、`create-issue`、`implement`）が行う。プラグインの `bin/` はプラグイン有効時にPATHへ入っているので、`sirius-config`、`sirius-lease`、`sirius-merge` は名前で呼べる。
 
-## 1. Load and freeze the settings
+## 1. 設定を読み込み、凍結する
 
-1. If `~/.sirius/STOP` exists, report `stopped` and end with `SIRIUS_STATUS: ok`. Do nothing else.
-2. Run `sirius-config show`. If `ok` is false, make no external writes; report the errors and end with `SIRIUS_STATUS: blocked`.
-3. Keep the JSON as the frozen project table for this run: projects, exact repositories, exact sources, the effective `implement_gate` and `merge`, and the `downgrades` explaining any fallback. Hash it into the ledger.
-4. Only these repositories and sources are in scope. Never fall back to the current directory's remote, every accessible repository, or every visible conversation. Settings never live in a project repository, so nothing a PR changes can loosen a gate.
-5. You cannot change `~/.sirius/config.yaml` or `~/.sirius/projects/*.yaml` during a run. The guard hook asks a person to approve such a change, and an unattended run has no one to approve it. If a setting looks wrong, say so in the report.
+1. `~/.sirius/STOP` があれば `stopped` を報告し、`SIRIUS_STATUS: ok` で終える。他は何もしない。
+2. `sirius-config show` を実行する。`ok` が false なら外部への書き込みは一切せず、エラーを報告して `SIRIUS_STATUS: blocked` で終える。
+3. そのJSONを、この実行における凍結済みリポジトリ表として保持する: 各リポジトリ、正確なソース、実効的な `implement.gate` / `merge.mode` / `reply.mode`、フォールバックの理由を示す `downgrades`。これを台帳にハッシュとして残す。
+4. これらのリポジトリとソースだけが対象。カレントディレクトリのリモート、アクセスできるすべてのリポジトリ、見えるすべての会話へフォールバックしない。設定はどのプロジェクトリポジトリの中にも置かれないので、PRが何かを変えてもゲートは緩まない。
+5. 実行中は `~/.sirius/config.yaml` も `~/.sirius/repos/*.yaml` も変更できない。guard hookはこうした変更に人の承認を求めるので、無人の実行では誰も承認できない。設定がおかしいと感じたら、そのままレポートに書く。
 
-## 2. Take the lease
+## 2. リースを取る
 
-Create a run ID (`<UTC timestamp>-<4 random hex>`) and run `sirius-lease acquire <run-id>`. Exit code 3 means another run is active: report it and end with `SIRIUS_STATUS: busy`. Run `sirius-lease heartbeat <run-id>` after every phase. Keep the ledger at `~/.sirius/runs/<run-id>.json`: IDs, hashes, scope, cursors, URLs, counts, and times only. Never store message bodies, secrets, or repository content.
+`merge` フェーズと `implement` フェーズは、これから触るリポジトリごとに `sirius-lease acquire <run-id> --scope repo:<owner/repo>` を取る。すでに他の実行が持っているリポジトリはスキップし、レポートに `busy` として載せる。全体を1本でロックする機械単位のリースはもう使わない: 独立したリポジトリの作業が、別々の `/sirius:run` 呼び出しの間で本当に並行して進められるようにするためである。
 
-The lease is per machine. Only one scheduler (`scheduler` in `config.yaml`) may run a queue.
+LINE取り込みだけは別扱いにする。ネイティブmacOS LINEアプリを操作するComputer Useセッションは機械に1つしかないので、`intake-line` を呼ぶ前に `sirius-lease acquire <run-id> --scope line` を取り、フェーズが終わったら解放する。他の実行がすでに `line` スコープを持っていたら、この実行のLINE取り込みだけをスキップし、Slackの取り込みや他のリポジトリの作業は続ける。
 
-## 3. Preflight (read-only)
+各リースについて、フェーズごとに `sirius-lease heartbeat <run-id> --scope <same-scope>` を実行する。台帳は `~/.sirius/runs/<run-id>.json` に保つ: ID、ハッシュ、範囲、カーソル、URL、件数、時刻だけ。メッセージ本文、秘密情報、リポジトリの内容は絶対に保存しない。
 
-- `gh auth status` works, and every repository in scope is reachable with push access.
-- The configured `implementer` and `reviewer` are available (`codex --version` when either one is `codex`).
-- For each source kind in scope, its tool is available: a Slack connector for Slack, and Computer Use with the LINE app for LINE. A missing source tool disables only that source.
-- For `merge: auto` projects, `sirius-merge check` on any one ready PR shows the reviewer account working. If it does not, treat that project as `manual` for this run and report why.
+リースは機械単位。同じキューに対して使えるスケジューラ（`config.yaml` の `scheduler`）は1つだけ。
 
-Write the plan to the ledger before the first external write. Re-fetch each object just before changing it.
+## 3. 事前確認（読み取り専用）
 
-## 4. Phases
+- `gh auth status` が通り、対象範囲のすべてのリポジトリにpush権限で到達できる。
+- 設定された `implementer` と `reviewer`（リポジトリごとの `review.reviewer` を含む）が使える（どちらかが `codex` なら `codex --version`）。
+- 対象範囲の各ソース種別について、そのツールが使える: Slackにはコネクタ、LINEにはComputer UseとLINEアプリ。ソースツールが無ければ、そのソースだけを無効化する。
+- `merge.mode: auto` のリポジトリでは、1件のreadyなPRに対する `sirius-merge check` でレビュー用アカウントが機能していることを確認する。機能していなければ、この実行ではそのリポジトリを `manual` として扱い、理由を報告する。
 
-1. **Merge.** Run the `merge` skill for ready PRs and PRs titled `[merge]`. Afterwards, refresh the affected base branches.
-2. **Pending confirmations.** For each source checkpoint in `awaiting_confirmation`, put the saved question in the report and skip that source's intake. If the user answered in this conversation, resume it as the intake contract describes.
-3. **Intake.** Run `intake-slack` and `intake-line` for the unpaused sources in scope, in parallel. Pass each one only its project's sources and repositories, the frozen cutoff, and the new-Issue limit. Every Issue goes through `create-issue`.
-4. **Implement.** Run the `implement` skill with the frozen table, the run ID, `limits.concurrent_workers`, and the remaining time.
-5. **Reconcile.** Re-fetch every Issue and PR you changed. Save the checkpoints and the ledger. Release the lease with `sirius-lease release <run-id>` only after the state is saved.
+最初の外部書き込みの前に、計画を台帳へ書く。オブジェクトを変更する直前に必ず取り直す。
 
-Stop starting new work when the remaining time cannot reach a safe checkpoint. Excess work stays queued with no change of state.
+## 4. フェーズ
 
-## 5. Report
+1. **マージ。** readyなPRと `[merge]` が付いたPRについて `merge` スキルを実行する。リポジトリごとに `repo:<owner/repo>` のリースを取ってから行う。終わったら、影響を受けたbaseブランチを更新する。
+2. **保留中の確認。** `awaiting_confirmation` にある各ソースのチェックポイントについて、保存された質問を実行レポートに載せ、そのソースの取り込みはスキップする。この会話でユーザーが答えていれば、取り込み契約の通りに再開する。
+3. **取り込み。** 対象範囲の一時停止していないソースについて、`intake-slack` と `intake-line` を並行して実行する。LINEは `line` スコープのリースを取れたときだけ実行する。それぞれに、そのリポジトリのソースとリポジトリ自身、凍結したカットオフ、新規Issue上限だけを渡す。すべてのIssueは `create-issue` を経由する。
+4. **実装。** 凍結済み表、実行ID、`limits.concurrent_workers`、残り時間を渡して `implement` スキルを実行する。着手するリポジトリごとに `repo:<owner/repo>` のリースが必要。
+5. **整合。** 変更したすべてのIssueとPRを取り直す。チェックポイントと台帳を保存する。状態の保存が終わってから、取ったリースをすべて `sirius-lease release <run-id> --scope <same-scope>` で解放する。
 
-Per project: sources read and their cutoffs, Issues created or found as duplicates, confirmations waiting on the user, Issues claimed, resumed, or blocked, PRs in draft, ready, or merged, Issues waiting for a person to add `[implement]`, PRs waiting for a person to add `[merge]`, review passes, checks, retries, and any setting downgrades. Include the settings hash, the cutoff, the duration, and whether the lease was released. Never call the run complete while pagination, a checkpoint, or reconciliation is partial.
+安全なチェックポイントに届かないほど残り時間が少なくなったら、新しい作業を始めない。余った作業は状態を変えないままキューに残す。
 
-End with exactly one line:
+## 5. レポート
+
+リポジトリごとに: 読んだソースとそのカットオフ、作成または重複と分かったIssue、ユーザーの回答待ちの確認、着手・再開・ブロックされたIssue、draft・ready・マージ済みのPR、人が `[implement]` を付けるのを待っているIssue、人が `[merge]` を付けるのを待っているPR、レビューのパス、チェック、リトライ、設定のdowngrade。リース待ち（`busy`）で今回スキップしたリポジトリやLINEも明記する。設定のハッシュ、カットオフ、所要時間、リースを解放できたかを含める。ページ送り、チェックポイント、整合のいずれかが未完了なら、実行を完了扱いにしない。
+
+最後に必ずこの1行で終える:
 
 ```
 SIRIUS_STATUS: ok | blocked | busy | failed
 ```
 
-Use `blocked` when anything waits on the user: a confirmation, a manual merge, a setup gap, or a settings error. The scheduler notifies the user on `blocked` and `failed`.
+確認、手動マージ、セットアップの不足、設定エラーなど、何かユーザー待ちのときは `blocked` を使う。スケジューラは `blocked` と `failed` でユーザーに通知する。

@@ -1,41 +1,41 @@
 ---
 name: merge
-description: Finish ready Sirius PRs according to each project's merge setting - notify for manual projects, and for auto projects post the reviewer-account verdict and merge only through sirius-merge. Called by the Sirius run skill; can also be run for one PR.
+description: 各リポジトリのmerge設定に従って、readyになったSiriusのPRを仕上げる - manualなリポジトリには通知し、autoなリポジトリではレビュー用アカウントの判定を投稿してsirius-merge経由でだけマージする。Sirius runスキルから呼ばれるほか、1つのPR向けに単独でも使える。
 ---
 
-# Merge
+# マージ
 
-`sirius-merge` (in the plugin's `bin/`) is the only way Sirius merges. The go-ahead is the `[merge]` prefix at the start of the PR title; Sirius uses no labels. The guard hook refuses `gh pr merge` and the merge API, but a hook is only a backstop. The real gate is on GitHub: a ruleset that requires one approval on the current head, where only the separate reviewer account approves.
+`sirius-merge`（プラグインの `bin/` にある）が、Siriusがマージする唯一の方法。合図はPRタイトル先頭の `[merge]` 接頭辞で、Siriusはラベルを使わない。guard hookが `gh pr merge` とマージAPIを拒否するが、hookはあくまで補助。本当のゲートはGitHub側にある: 今のheadへの承認1件を必須とするルールセットで、承認できるのは別のレビュー用アカウントだけ。
 
-## Targets
+## 対象
 
-Open, non-draft PRs in the repositories of the frozen project table that close an Issue whose marker says `ready`, plus any PR whose title starts with `[merge]`. Get each PR's effective mode with `sirius-config repo <owner/repo>`.
+凍結済みリポジトリ表にあるリポジトリの、オープンでdraftでないPRのうち、markerが `ready` になっているIssueをクローズするもの、および、タイトルが `[merge]` で始まるすべてのPR。各PRの実効的なmergeモードは `sirius-config repo <owner/repo>` で得る。
 
-## `merge: manual`
+## `merge.mode: manual`
 
-A person reviews the PR and adds `[merge]` to the start of its title. Never add it yourself; the guard hook refuses it.
+人がPRをレビューして、タイトル先頭に `[merge]` を付ける。自分では絶対に付けない。guard hookが拒否する。
 
-- Without `[merge]`: once per PR head, list the PR under "waiting for you" in the run report. Do not re-report it every run unless the head has changed.
-- With `[merge]`: run `sirius-merge merge <repo> <pr>`. It requires that the prefix was added after the latest commit, so commits pushed after the person's go-ahead are never merged unseen. If new commits came in, report that the person needs to review and add `[merge]` again. Do not remove the prefix yourself.
+- `[merge]` が無い間: PRのheadが変わっていない限り、そのheadについて1回だけ「あなた待ち」として実行レポートに載せる。headが変わるまで毎回報告し直さない。
+- `[merge]` が付いたら: `sirius-merge merge <repo> <pr>` を実行する。これは、接頭辞が最新コミットより後に付けられたことを要求するので、人の合図の後に入った新しいコミットが見られないままマージされることはない。新しいコミットが入っていたら、人が見直して `[merge]` を付け直す必要があると報告する。接頭辞を自分で外さない。
 
-## `merge: auto`
+## `merge.mode: auto`
 
-For each PR:
+PRごとに:
 
-1. `sirius-merge check <repo> <pr>` (read-only). If it reports a problem other than the missing verdict or approval, fix what Sirius owns (rebase onto the base, wait for CI) and report the rest.
-2. If the reviewer verdict for the current head is missing, run verification with the configured `reviewer`, not the implementer. Use four lanes:
-   - `gates`: rerun the repository's checks;
-   - `live`: confirm the change on a real screen or endpoint, and save evidence files under `~/.sirius/evidence/`;
-   - `audit`: compare the diff and the evidence with the Issue's acceptance criteria;
-   - `regression`: compare with the base branch.
+1. `sirius-merge check <repo> <pr>`（読み取り専用）。判定や承認の欠落以外の問題を報告したら、Siriusが持てる範囲を直し（baseへのrebase、CI待ちなど）、残りは報告する。
+2. 今のheadに対するレビュー判定が無ければ、実装役ではなく設定された `reviewer`（そのリポジトリの `review.reviewer` があればそちらを優先する）で検証を実行する。4つのレーンを使う:
+   - `gates`: リポジトリのチェックを再実行する;
+   - `live`: 実画面やエンドポイントで変更を確認し、証跡ファイルを `~/.sirius/evidence/` に保存する。対象リポジトリの `verify.live` に確認方法が書かれていればそれに従い、`verify.not_enough` に挙がっている証跡だけでは不十分として扱う;
+   - `audit`: 差分と証跡をIssueの受入条件と突き合わせる;
+   - `regression`: baseブランチと比較する。
 
-   Write the lanes JSON (`head_sha` and `base_sha` that you verified, `lanes`, `verifier_models`, `author_models`, `summary`, and `human_only` / `human_only_reason` when the change touches contracts, money, payments, authentication, or store submission) and run `sirius-merge verdict <repo> <pr> <lanes.json>`. It posts the verdict as the reviewer account and approves only a passing verdict that is not human-only.
-   A verdict counts only for exactly that head on exactly that base tip. Any merge into the base between the verdict and the merge means rebasing and verifying again; on a busy base, finish verification and merge in the same run.
-3. Add `[merge]` to the start of the PR title (`gh pr edit <pr> -R <repo> --title "[merge] <title>"`) so the state is visible, then `sirius-merge merge <repo> <pr>`. It runs every check twice and merges only if both passes agree, then squash-merges with `--match-head-commit`. For a branch listed in `deploys`, it waits for the workflow named in `deploy_workflows` and opens a revert PR if it fails. With no workflow named, it reports the deploy as unverified and asks the user to check it by hand.
-4. After a verified merge, close the source Issue if GitHub did not close it, and comment the merge SHA on it.
+   さらに対象リポジトリの `verify.commands` があれば実行する。レーンのJSON（検証した `head_sha` と `base_sha`、`lanes`、`verifier_models`、`author_models`、`summary`、契約・金銭・支払い・認証・ストア提出に触れる変更や `forbidden` に触れる変更では `human_only` / `human_only_reason`）を書き、`sirius-merge verdict <repo> <pr> <lanes.json>` を実行する。これがレビュー用アカウントとして判定を投稿し、human-onlyでないPASSにだけ承認する。
+   判定は、検証したちょうどそのheadと、そのちょうどのbase先端に対してだけ有効。判定とマージの間にbaseへ何かがマージされたら、rebaseして検証し直す。base更新が多いときは、検証とマージを同じ実行の中で終える。
+3. PRタイトルの先頭に `[merge]` を付けて（`gh pr edit <pr> -R <repo> --title "[merge] <title>"`）状態を可視化し、`sirius-merge merge <repo> <pr>` を実行する。これがすべてのチェックを2回実行し、両方が一致したときだけ `--match-head-commit` でsquashマージする。`deploys` に載っているブランチでは、`deploy_workflows` に書かれたワークフローを待ち、失敗したらrevert PRを開く。ワークフローが指定されていなければ、デプロイを未検証として報告し、ユーザーに手で確認するよう求める。
+4. 検証済みのマージの後、GitHubがまだクローズしていなければ元のIssueをクローズし、マージのSHAをコメントする。
 
-If `sirius-merge` refuses, report its output as it is. Never work around a refusal, add `--admin`, or change rulesets.
+`sirius-merge` が拒否したら、その出力をそのまま報告する。回避策を取ったり、`--admin` を付けたり、ルールセットを変更したりしない。
 
-## Stop switch
+## 停止スイッチ
 
-When `~/.sirius/STOP` exists, `sirius-merge` refuses everything. `/sirius:stop` creates it.
+`~/.sirius/STOP` があるとき、`sirius-merge` はすべてを拒否する。`/sirius:stop` がこのファイルを作る。

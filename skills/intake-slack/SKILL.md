@@ -1,34 +1,38 @@
 ---
 name: intake-slack
-description: Read the Slack channels listed in ~/.sirius/projects/*.yaml for a frozen time window and turn unresolved requests into deduplicated GitHub Issues through create-issue. Called by the Sirius run skill; also usable alone for one project.
+description: ~/.sirius/repos/*.yamlに列挙されたSlackチャンネルを凍結された時間窓だけ読み、未解決の依頼をcreate-issue経由で重複排除しつつGitHub Issueにする。Sirius runスキルから呼ばれるほか、1つのリポジトリ向けに単独でも使える。
 user-invocable: false
 ---
 
-# Slack intake
+# Slack取り込み
 
-Read [the intake contract](../../references/intake-contract.md) completely first. It defines scope, checkpoints, confirmations, candidate rules, and the action packet. This file adds only what is specific to Slack.
+まず[取り込み契約](../../references/intake-contract.md)を完全に読む。範囲、チェックポイント、確認、候補の判定基準、アクションパケットはそこで定義されている。このファイルはSlack固有の内容だけを追加する。
 
-## Tools
+## ツール
 
-1. Prefer a connected Slack connector or MCP server (search and read tools for channels and threads).
-2. If no connector reaches a listed workspace, report that workspace as `unavailable`. Do not switch to desktop screen control unless the operator's own skills for it are installed and the user asked for it.
+1. 接続済みのSlackコネクタかMCPサーバー（チャンネルとスレッドの検索・読み取りツール）を優先する。
+2. 一覧にあるワークスペースにコネクタが届かない場合は、そのワークスペースを `unavailable` として報告する。オペレーター自身のデスクトップ操作用スキルが導入済みで、ユーザーが求めていない限り、デスクトップの画面操作には切り替えない。
 
-Slack stays read-only: no posting, reactions, edits, or marking as read.
+Slackは読み取り専用のまま扱う: 投稿、リアクション、編集、既読化は一切しない。
 
-## Collect
+## 収集
 
-For each `{workspace, channel}` in the frozen table:
+凍結された表にある `{workspace, channel}` ごとに:
 
-1. Read channel history for `last_completed_cutoff < ts <= run_cutoff`, oldest first, following every page cursor.
-2. For each message with replies, read the full thread.
-3. Catch new replies under older parents: also read history for the previous 30 days and open every thread whose `latest_reply` falls inside the window. When the tool exposes search, a search limited to the channel and the window finds the same replies. Evaluate only the replies inside the window as new; use the older messages as context.
-4. Deduplicate by permalink, or by channel ID plus `ts`.
-5. Evaluate candidates in order so the scan can stop exactly at a confirmation.
+1. `last_completed_cutoff < ts <= run_cutoff` の範囲のチャンネル履歴を、すべてのページカーソルをたどりながら古い順に読む。
+2. 返信があるメッセージは、スレッド全体を読む。
+3. 古い親メッセージへの新しい返信も拾う: 過去30日分の履歴も読み、`latest_reply` がこの時間窓に入っているスレッドはすべて開く。ツールが検索を提供していれば、そのチャンネルとこの時間窓に絞った検索でも同じ返信が見つかる。時間窓の中にある返信だけを新規として評価し、それより古いメッセージは文脈として使う。
+4. パーマリンク、またはチャンネルIDと `ts` の組で重複排除する。
+5. 候補は順番に評価し、確認が必要になった時点でスキャンをちょうど止められるようにする。
 
-Use channel search for strong identifiers (error codes, ticket numbers, repository URLs) only inside the listed channels.
+強い識別子（エラーコード、チケット番号、リポジトリURL）でのチャンネル検索は、一覧にあるチャンネルの中だけに限定して使う。
 
-`resume_cursor` is `{workspace, channel, ts}` of the next unprocessed message.
+`resume_cursor` は次の未処理メッセージの `{workspace, channel, ts}` とする。
 
-## Packet specifics
+## パケット固有の項目
 
-Set `source: slack`, `workspace` to the workspace ID, `conversation` to the channel ID, and `permalink` when the tool returns one. `create-issue` decides whether the permalink may appear in the Issue, depending on repository visibility.
+`source: slack`、`workspace` にワークスペースID、`conversation` にチャンネルID、ツールがパーマリンクを返せば `permalink` を設定する。そのパーマリンクをIssueに載せてよいかは、リポジトリの公開設定に応じて `create-issue` が判断する。
+
+## reply.mode について
+
+対象リポジトリの `reply.mode` が `draft` のときは、`slack_send_message_draft` が使えるならそれで下書きを作り、使えなければ提案する返信文をIssueかこの実行のレポートに書く。実際には送信しない。`send` のときは、承認済みの送信ツールで実際に送る。

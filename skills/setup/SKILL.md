@@ -1,78 +1,80 @@
 ---
 name: setup
-description: Register the current project directory with Sirius, or create the global settings, by writing ~/.sirius/config.yaml and ~/.sirius/projects/<name>.yaml interactively, then print the checklist of steps only the operator can do (permissions, reviewer account, rulesets, scheduler). Use for /sirius:setup.
+description: 現在のディレクトリのリポジトリをSiriusへ登録する、またはグローバル設定を作る。~/.sirius/config.yamlと~/.sirius/repos/<owner>__<repo>.yamlを対話的に書き、オペレーターにしかできない作業（権限、レビュー用アカウント、ルールセット、スケジューラ）のチェックリストを表示する。/sirius:setupに使う。
 disable-model-invocation: true
 ---
 
 # Sirius setup
 
-Setup is interactive. Every write to `~/.sirius/config.yaml` or `~/.sirius/projects/` goes through the Write or Edit tool, and the guard hook asks the user to approve it. Never write these files from the shell. Nothing is written inside the project repository.
+セットアップは対話的に行う。`~/.sirius/config.yaml` や `~/.sirius/repos/` への書き込みはすべてWriteかEditツールを通し、guard hookがユーザーに承認を求める。これらのファイルをシェルから書かない。プロジェクトのリポジトリの中には何も書かない。
 
-## 1. Global settings (first time only)
+## 1. グローバル設定（初回だけ）
 
-If `~/.sirius/config.yaml` does not exist, ask with AskUserQuestion:
+`~/.sirius/config.yaml` が無ければ、AskUserQuestionで尋ねる:
 
-- **implementer** and **reviewer**: `claude` or `codex`. They must differ for `merge: auto` to work. Recommend implementer `claude` and reviewer `codex`.
-- **Ceilings**: the loosest `implement_gate` (`human` or `auto`) and `merge` (`manual` or `auto`) any project may use. Projects can be stricter, never looser.
-- **scheduler**: `none` (run `/sirius:run` by hand), `loop` (`/loop 10m /sirius:run` inside an open session), or `launchd` (every N minutes in the background on this Mac). Use one scheduler per machine and do not add a cloud routine for the same queue: the lease is per machine.
+- **implementer** と **reviewer**: `claude` か `codex`。`merge.mode: auto` を機能させるには両者が異なっている必要がある。implementerに `claude`、reviewerに `codex` を勧める。
+- **上限**: どのリポジトリでも使ってよい最も緩い `implement_gate`（`human` か `auto`）、`merge`（`manual` か `auto`）、`reply.mode`（`draft` か `send`）。個々のリポジトリはこれより厳しくできるが、緩くはできない。
+- **scheduler**: `none`（手で `/sirius:run` を実行する）、`loop`（開いているセッションで `/loop 10m /sirius:run`）、`launchd`（このMacでバックグラウンドからN分ごと）。1つのマシンにつきスケジューラは1つにし、同じキューにクラウドのルーチンを重ねない: リースは機械単位。
 
-Write it from [the template](../../templates/config.yaml).
+[テンプレート](../../templates/config.yaml)から書く。
 
-## 2. Register this project
+## 2. このリポジトリを登録する
 
-1. Read `git remote get-url origin` in the current directory. Convert it to `owner/repo` and confirm it with `gh repo view`.
-2. Run `sirius-config repo <owner/repo>`. If a project already lists it, show that project and offer to edit it instead of creating a second one. A repository may belong to only one project.
-3. Ask for the project name (default: the repository name, in kebab-case), any other repositories in the same project, the sources, and the gates:
-   - Slack: exact workspace ID (`T…`) and channel IDs (`C…`). When a Slack connector is available, list the user's channels so they can pick. Names and wildcards do not count.
-   - LINE: exact chat titles as shown in the app (this Mac only).
-   - `implement_gate`: `human` means a person puts `[implement]` at the start of an Issue title before Sirius builds it. `auto` means Sirius prefixes the Issues it creates itself when the acceptance criteria are clear.
-   - `merge`: `manual` means a person puts `[merge]` at the start of a ready PR's title and Sirius then merges it. `auto` means Sirius merges when the reviewer account's verdict, the approval, CI, and the base-branch conditions all pass.
-   - Rules for each repository in `merge_rules`: `ci_required`, `approvals` (human approvals needed in addition to the reviewer account), `human_branches` (branch → reason, `*` for all), `deploys` (branch → what a merge deploys), and `deploy_workflows` (branch → the Actions workflow that performs it).
-4. Write `~/.sirius/projects/<name>.yaml` from [the template](../../templates/project.yaml), with `dir` set to the current directory.
-5. Run `sirius-config validate` and show the effective result, including any `downgrades`.
+1. 現在のディレクトリで `git remote get-url origin` を読む。`owner/repo` に変換し、`gh repo view` で確認する。
+2. `sirius-config repo <owner/repo>` を実行する。すでに設定ファイルがあれば、それを見せて編集を提案する。新規に作る代わりに。1つのリポジトリにつき設定ファイルは1つだけ。
+3. ソースとゲートを尋ねる:
+   - Slack: 正確なワークスペースID（`T…`）とチャンネルID（`C…`）。Slackコネクタが使えるときは、ユーザーが選べるようチャンネル一覧を出す。名前やワイルドカードは対象にならない。
+   - LINE: アプリに表示されている通りの正確なチャット名（このMacだけ）。
+   - `implement.gate`: `human` は人がIssueタイトルの先頭に `[implement]` を付けてからSiriusが実装することを意味する。`auto` は、受入条件がはっきりしているIssueにSirius自身が作成時から接頭辞を付けることを意味する。
+   - `merge.mode`: `manual` は人がreadyなPRのタイトル先頭に `[merge]` を付け、その後Siriusがマージすることを意味する。`auto` は、レビュー用アカウントの判定、承認、CI、baseブランチの条件がすべて揃ったときにSiriusがマージすることを意味する。
+   - `reply.mode`: `draft` はSiriusが送信せず提案文をIssue/レポートに書くだけ。`send` はSiriusが実際に返信する。LINEには送信の仕組みがないので、`reply.mode: send` を選んでもLINE向けの返信は当面Issue/レポートへの記載にとどまる。
+   - `merge` の下の各種ルール: `ci_required`、`approvals`（レビュー用アカウントに加えて必要な人の承認数）、`human_branches`（ブランチ→理由、`*` は全ブランチ）、`deploys`（ブランチ→そのマージが何をデプロイするか）、`deploy_workflows`（ブランチ→デプロイを行うActionsワークフロー名）。
+   - `investigate` / `review` / `verify` / `forbidden`: どこまで埋めるかはユーザーに委ねる。分からない・決めていないものは空のままにしてよいと伝える。
+4. [テンプレート](../../templates/repo.yaml)から `~/.sirius/repos/<owner>__<repo>.yaml`（`owner/repo` を小文字化し `/` を `__` に置き換えたファイル名）を書き、`dir` を現在のディレクトリに設定する。
+5. `sirius-config validate` を実行し、`downgrades` を含めて実効結果を見せる。
 
-For a project migrated from the old Sirius, the file has `needs_review: true`. That keeps the project on `human` and `manual` until the user has checked the file and removed the flag. Walk through the file with the user; do not remove the flag on your own judgment.
+旧Siriusから移行したリポジトリのファイルには `needs_review: true` が付いている。これは、ユーザーがファイルを確認してこのフラグを外すまで、`human` / `manual` / `draft` に留める。ファイルを一緒に見ながら確認する。自分の判断でフラグを外さない。
 
-Sirius creates no labels. State lives in the title prefixes `[implement]` and `[merge]`, the Issue marker comment, and the PR's draft or ready status.
+Siriusはラベルを作らない。状態はタイトル接頭辞の `[implement]` / `[merge]`、Issueのmarkerコメント、PRのdraft/ready状態にある。
 
-## 3. Operator checklist
+## 3. オペレーターのチェックリスト
 
-Print the steps that apply as a checklist, with exact commands. The agent must not do these itself: the guard hook refuses ruleset changes, and auto mode refuses writes to settings files.
+該当する手順を、正確なコマンド付きのチェックリストとして表示する。エージェント自身はこれらを行わない: guard hookがルールセットの変更を拒否し、自動モードは設定ファイルへの書き込みを拒否する。
 
-**Always**
+**常に**
 
-- Add to `~/.claude/settings.json` under `permissions.deny`: `Bash(gh pr merge:*)`, `Bash(git push --force:*)`, `Bash(git push -f:*)`. The plugin cannot ship permission rules, and the guard hook is only a backstop.
-- If auto mode is used, list every repository in scope in the auto-mode `environment`, or the classifier may refuse legitimate work in the repositories it does not know.
+- `~/.claude/settings.json` の `permissions.deny` に追加: `Bash(gh pr merge:*)`、`Bash(git push --force:*)`、`Bash(git push -f:*)`。プラグインはこれらの権限ルールを同梱できず、guard hookはあくまで補助。
+- 自動モードを使うなら、対象範囲のすべてのリポジトリを自動モードの `environment` に列挙する。さもないと、分類器が知らないリポジトリで正当な作業を拒否することがある。
 
-**When any project uses `merge: auto`**
+**いずれかのリポジトリが `merge.mode: auto` を使うとき**
 
-1. Create a separate GitHub account for review (a machine user) and give it write access to the repositories. It must not be the account the agent uses.
-2. Log it in to its own gh config directory:
+1. レビュー専用の別GitHubアカウント（マシンユーザー）を作り、対象リポジトリへの書き込み権限を与える。エージェントが使うアカウントと同じであってはならない。
+2. 専用の gh 設定ディレクトリでログインする:
    ```bash
    GH_CONFIG_DIR=~/.sirius/identities/reviewer gh auth login
    ```
-3. Add it to `config.yaml`:
+3. `config.yaml` に追加する:
    ```yaml
    identities:
      reviewer: {login: <account>, gh_config_dir: ~/.sirius/identities/reviewer}
    ```
-4. On each repository's default branch, add a ruleset that requires one approving review, dismisses stale approvals on push, and requires approval of the most recent push. Without it, the gate is enforced only by Sirius's own tools. Give the exact `gh api` command or the settings page URL.
+4. 各リポジトリのデフォルトブランチに、承認1件を必須とし、pushで古い承認を無効化し、最新のpushへの承認を必須とするルールセットを追加する。これが無いと、ゲートはSirius自身のツールだけで守られることになる。正確な `gh api` コマンドか設定ページのURLを示す。
 
-Until steps 1-3 are done, `sirius-config` reports those projects as `manual`.
+1〜3が済むまで、`sirius-config` はそれらのリポジトリを `manual` として報告する。
 
-**Scheduler `launchd`**
+**スケジューラ `launchd`**
 
-Copy `bin/sirius-tick` to `~/.sirius/bin/sirius-tick`, so the job does not point into the versioned plugin cache. Then generate the plist from [the template](../../templates/launchd.plist) with the chosen interval, and give the user these commands:
+`bin/sirius-tick` を `~/.sirius/bin/sirius-tick` にコピーし、ジョブがバージョン管理されたプラグインキャッシュを指さないようにする。次に、選んだ間隔で[テンプレート](../../templates/launchd.plist)からplistを生成し、次のコマンドをユーザーに渡す:
 
 ```bash
 cp <plist> ~/Library/LaunchAgents/ai.sirius.tick.plist
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.sirius.tick.plist
 ```
 
-The tick runs `claude -p "/sirius:run"` from `~/.sirius`, so the plugin must be enabled at user scope (`/plugin install sirius@sirius --scope user`). If it is enabled only in project settings, the scheduled run cannot see `/sirius:run`. The tick removes `ANTHROPIC_BASE_URL` and model-override variables and runs with `--model opus --effort high` (override with `SIRIUS_MODEL` / `SIRIUS_EFFORT`, or keep the environment with `SIRIUS_TICK_KEEP_ENV=1`).
+tickは `~/.sirius` から `claude -p "/sirius:run"` を実行するので、プラグインはユーザースコープで有効になっている必要がある（`/plugin install sirius@sirius --scope user`）。プロジェクト設定だけで有効にしていると、スケジュール実行から `/sirius:run` が見えない。tickは `ANTHROPIC_BASE_URL` とモデル上書き用の環境変数を取り除き、`--model opus --effort high` で実行する（`SIRIUS_MODEL` / `SIRIUS_EFFORT` で上書き、`SIRIUS_TICK_KEEP_ENV=1` で環境をそのまま保持）。
 
-The job uses `StartInterval` without `KeepAlive`, so a crash does not cause a restart loop. To stop it: `launchctl bootout gui/$(id -u)/ai.sirius.tick`.
+ジョブは `KeepAlive` なしの `StartInterval` を使うので、クラッシュが再起動ループを招かない。止めるには: `launchctl bootout gui/$(id -u)/ai.sirius.tick`。
 
-## 4. Finish
+## 4. 仕上げ
 
-Show `sirius-config show` for the project and the remaining checklist. Suggest `/sirius:status` next.
+そのリポジトリの `sirius-config show` と、残りのチェックリストを表示する。次に `/sirius:status` を提案する。

@@ -1,33 +1,35 @@
-# Review contract
+# レビュー契約
 
-The implementer and reviewer are `implementer` and `reviewer` in `~/.sirius/config.yaml` (`claude` or `codex`). `merge: auto` requires them to differ; with the same model on both sides, `sirius-config` falls back to `manual`.
+実装役とレビュー役は `~/.sirius/config.yaml` の `implementer` と `reviewer`（`claude` か `codex`）で決まるが、対象リポジトリの `review.reviewer` が設定されていれば、そのリポジトリではそちらを使う（`sirius-config repo <owner/repo>` の解決結果を見る。空ならグローバルの `reviewer` にフォールバックする）。`merge.mode: auto` は実装役とレビュー役が別モデルであることを要求し、同じモデルなら `sirius-config` が `manual` にフォールバックする。
 
-Run every review from the isolated Issue checkout after fetching the base and checking out the exact pushed pull-request head.
+レビューは毎回、baseを取得してから、pushされたpull requestのheadを正確にcheckoutした、独立したIssueのチェックアウトから実行する。
 
-## Command shape
+## コマンドの形
 
-- `codex`: `codex exec --sandbox read-only "<review-prompt> Review the diff of origin/<verified-base-branch>...HEAD in this checkout."` from the checkout. Do not use `codex review --base` with a prompt: the CLI rejects that combination.
-- `claude`: launch a new Claude subagent in the checkout with the prompt below and the diff against the base. It must not reuse the implementer's context.
+- `codex`: チェックアウトから `codex exec --sandbox read-only "<review-prompt> Review the diff of origin/<verified-base-branch>...HEAD in this checkout."`。`codex review --base` とプロンプトの組み合わせは使わない: CLIがその組み合わせを拒否する。
+- `claude`: チェックアウトで、下のプロンプトとbaseとの差分を渡して新しいClaudeサブエージェントを起動する。実装役のコンテキストを再利用してはならない。
 
-Use a fresh reviewer for every pass. Do not resume the prior reviewer session. Do not enable unsafe sandbox or approval bypasses.
+パスごとに新しいレビュワーを使う。前のレビュワーのセッションを再開しない。安全でないサンドボックスや承認バイパスを有効にしない。
 
-## Review prompt
+## レビュー用プロンプト
 
 ```text
-Review this pull-request diff for actionable correctness, security, data-loss, concurrency, compatibility, regression, and missing-test problems. Read repository instructions and the linked Issue acceptance criteria. Do not focus on subjective style unless it causes a concrete maintenance or correctness risk.
+Review this pull-request diff for actionable correctness, security, data-loss, concurrency, compatibility, regression, and missing-test problems. Read repository instructions and the linked Issue acceptance criteria. Pay particular attention to the repo's review.focus list, when one is supplied. Do not focus on subjective style unless it causes a concrete maintenance or correctness risk.
 
 For each finding, report severity, file and line, evidence, impact, and the smallest valid fix. If and only if there are no actionable findings, end with the exact line NO_FINDINGS. Do not emit NO_FINDINGS when review could not complete.
 ```
 
-## Decision rules
+対象リポジトリに `review.focus` があれば、プロンプトに差し込んで渡す。`forbidden` に触れる変更（本番公開、支払い、契約、認証情報、権限変更など）は、実装が正しくても見つけたら指摘し、必要なら `human_only` として扱う。
 
-- Exit success alone does not mean clean; inspect the completed review output.
-- `NO_FINDINGS` is valid only when it is the final verdict of a completed review and no actionable finding appears elsewhere in that review.
-- Tool errors, authentication errors, rate limits, timeouts, incomplete output, and contradictory findings are not clean.
-- After any code, test, configuration, lockfile, or generated-file change, discard the old verdict and run a fresh review.
-- If the implementer believes a finding is false, gather concrete repository evidence and include it in the next fresh review. Do not self-dismiss the last remaining finding.
-- Store review output outside the repository or in ignored temporary state. Never commit reviewer logs or credentials.
+## 判定のルール
 
-## Clean-review evidence
+- 終了コードが成功しただけではクリーンとは言えない。完了したレビュー出力を確認する。
+- `NO_FINDINGS` は、完了したレビューの最終判定としてだけ有効で、そのレビューの他の場所に実行すべき指摘が出ていないときに限る。
+- ツールのエラー、認証エラー、レート制限、タイムアウト、不完全な出力、矛盾した指摘はクリーンではない。
+- コード、テスト、設定、lockfile、生成ファイルのいずれかが変わったら、古い判定は捨てて新しいレビューを実行する。
+- 実装側が指摘を誤りだと考える場合は、リポジトリの具体的な証拠を集めて次の新しいレビューに含める。最後に残った指摘を自己判断で却下しない。
+- レビュー出力はリポジトリの外か、無視される一時状態に保存する。レビュワーのログや資格情報をコミットしない。
 
-Record the reviewed head SHA, base branch and SHA, reviewer, timestamp, and clean final verdict in the Issue's single marker comment. For `merge: auto` projects, the merge skill turns this into a verdict posted by the reviewer account. A later pushed commit invalidates this evidence.
+## クリーンなレビューの証跡
+
+レビューしたheadのSHA、baseブランチとSHA、レビュワー、日時、クリーンな最終判定を、Issueの単一のmarkerコメントに記録する。`merge.mode: auto` のリポジトリでは、mergeスキルがこれをレビュー用アカウントが投稿する判定に変換する。後から新しいコミットがpushされると、この証跡は無効になる。

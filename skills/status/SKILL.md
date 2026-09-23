@@ -1,22 +1,22 @@
 ---
 name: status
-description: Show Sirius state read-only - effective per-project settings and downgrades, the lease, source checkpoints and pending questions, queued and in-progress Issues, and PRs waiting for review or merge. Use for /sirius:status.
+description: Siriusの状態を読み取り専用で表示する - リポジトリごとの実効設定とdowngrade、リース状況、ソースのチェックポイントと保留中の質問、キュー中/進行中のIssue、レビューやマージ待ちのPR。/sirius:statusに使う。
 ---
 
 # Sirius status
 
-Read-only. Make no writes anywhere.
+読み取り専用。どこにも書き込まない。
 
-1. `sirius-config show`: for each project, show the repositories, sources, effective `implement_gate` and `merge`, and every `downgrades` reason. Show config errors first when there are any.
-2. `sirius-lease status` and whether `~/.sirius/STOP` exists.
-3. Checkpoints under `~/.sirius/state/intake/`: last completed cutoff per source, and any pending question word for word.
-4. For each repository, with `gh`:
-   - Issues whose title starts with `[implement]` and that have no marker yet (queued);
-   - Issues whose marker phase is `working` (branch, PR, last update), `waiting`, or `blocked` (with the question);
-   - Issues Sirius created without `[implement]` in `human` projects: "waiting for you to add [implement]";
-   - ready PRs: in `manual` projects without `[merge]`, "waiting for you to add [merge]"; otherwise the result of `sirius-merge check`.
-5. The newest file in `~/.sirius/runs/` and `~/.sirius/logs/tick/`: when the last run was and its `SIRIUS_STATUS`.
+1. `sirius-config show`: リポジトリごとに、リポジトリ名、ソース、実効的な `implement.gate` / `merge.mode` / `reply.mode`、`downgrades` の理由をすべて表示する。設定エラーがあれば先に見せる。
+2. `sirius-lease status --scope run`、対象範囲にあるリポジトリごとの `sirius-lease status --scope repo:<owner/repo>`、`sirius-lease status --scope line`、そして `~/.sirius/STOP` の有無。
+3. `~/.sirius/state/intake/` 配下のチェックポイント: ソースごとの最終完了カットオフと、保留中の質問があれば一言一句そのまま。
+4. リポジトリごとに `gh` で:
+   - タイトルが `[implement]` で始まり、まだmarkerが付いていないIssue（キュー中）;
+   - markerのphaseが `working`（ブランチ、PR、最終更新）、`waiting`、`blocked`（質問付き）のIssue;
+   - `human` のリポジトリでSiriusが `[implement]` を付けずに作ったIssue: 「あなたが `[implement]` を付けるのを待っている」;
+   - readyなPR: `manual` のリポジトリで `[merge]` が無ければ「あなたが `[merge]` を付けるのを待っている」、それ以外は `sirius-merge check` の結果。
+5. `~/.sirius/runs/` と `~/.sirius/logs/tick/` の中で最も新しいファイル: 最後の実行がいつで、その `SIRIUS_STATUS` が何だったか。
 
-When the current directory is a registered project (`sirius-config project`), show that project first and in detail, and the others as one line each.
+現在のディレクトリが登録済みのリポジトリなら（`sirius-config repo --dir` で判定）、そのリポジトリを最初に詳しく見せ、他は1行ずつにする。
 
-End with what is waiting on the user, most urgent first.
+最後に、ユーザー待ちのものを緊急度の高い順にまとめる。
