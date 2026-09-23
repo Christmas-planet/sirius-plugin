@@ -47,6 +47,8 @@ pending_confirmation: <confirmation-id-question-and-packet-or-null>
 - 追跡が必要な約束された成果物や期限;
 - 後で回復していない自動化されたエラー。
 
+依頼が一覧にあるリポジトリ（workspaceならメンバー）の既存のオープンPRへの対応（レビューコメントや変更要求への対応、botの指摘の対応、「確認をお願いします」と添えられたPRのレビュー結果）なら、Issueではなく `target: {kind: pr, url: <PR URL>}` のパケットにする。PRのURLはメッセージのリンクを手がかりに `gh pr view` で実在とリポジトリを確かめる。PRが複数なら1PR1パケットにし、共通の `request_group` を付ける（返信は1通にまとめる）。
+
 FYI、了解の返事、雑談、成功の通知、すでに解決済みの項目、完全に他の人が持っている作業、チャットの返信だけで済むものは却下する。未読状態だけでは理由にならない。
 
 引き渡す前に、同じ会話を十分読んで最新の状況を確認する。後の修正は候補を打ち消す。添付ファイルやリンクは表示されているラベルだけで記録する。開いたりダウンロードしたりしない。
@@ -76,6 +78,7 @@ source_ref:
   timestamp: <timestamp with time zone>
   excerpt: <short paraphrase>
 repo: <owner/repo, from the frozen repo table; null only when asking which repo>
+target: {kind: issue | pr, url: <existing PR URL when kind is pr, else null>}
 candidate_repos: [<workspace members>]   # workspace のソースのとき
 request_group: <stable id of the originating request or null>   # workspace のソースのとき
 related_repos: [<other repos in the same request_group>]

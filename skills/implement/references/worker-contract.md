@@ -1,22 +1,23 @@
 # ワーカー契約
 
-並列に動く実装ワーカーごとに、この契約を使う。プレースホルダは検証済みの値に置き換える。ワーカーに追加のIssueを自分で見つけたり主張させたりしない。
+並列に動くワーカーごとに、この契約を使う。プレースホルダは検証済みの値に置き換える。ワーカーに追加の仕事を自分で見つけたり主張させたりしない。`implementer` が `claude` / `codex` なら「ワーカー向けプロンプト」（Issueだけを扱う）、`pstack` なら「pstack向けプロンプト」（IssueとPR対応の両方）を使う。
 
 ## 入力
 
 - 実行ID: `<run-id>`
-- Issue: `<canonical-issue-url>`
+- 仕事: Issue `<canonical-issue-url>` か、PR対応 `<canonical-pr-url>`
 - リポジトリ: `<owner/repo>`
-- ベースブランチ: `<verified-default-branch>`
+- ベースブランチ: `<verified-base-branch>`（PR対応ではそのPRの現在のbase）
 - worktree: `<isolated-absolute-path>`
-- ブランチ: `sirius/issue-<number>-<slug>`
+- ブランチ: Issueは `sirius/issue-<number>-<slug>`、PR対応はそのPRのheadブランチ
 - 確認済みのブロッカー: なし
 - 推測された同時実行の衝突: なし
 - リポジトリの `investigate.read_first`（リポジトリ内で先に読むパス）
 - リポジトリの `investigate.knowledge`（リポジトリの外にある、知っておくべき情報: `{where, what}` の一覧）
+- リポジトリの `investigate.ask_user_when`（推測せず質問を返す状況）
 - リポジトリの `implement.conventions`（PR本文の書式やコミットの決まりなど）
 - リポジトリの `forbidden`（このリポジトリで絶対にしてはいけないことの一覧）
-- リポジトリの `verify.commands` / `verify.live` / `verify.not_enough`
+- リポジトリの `verify.commands` / `verify.live` / `verify.not_enough` / `verify.deploy`（本番以外の環境へのデプロイ方法）
 - `implement.model` / `implement.effort`（設定されていれば、ワーカーを起動するときのモデルと推論努力度）
 
 ## ワーカー向けプロンプト
@@ -63,14 +64,64 @@ Return: issue URL, branch, commit SHA, draft PR URL, files changed, commands
 run with outcomes, acceptance evidence, and any blocker.
 ```
 
+## pstack向けプロンプト
+
+`implementer: pstack` のとき、`pstack:poteto-agent` に渡す。仕事がIssueかPR対応かで最初の段落を選ぶ。
+
+```text
+Work on exactly one task for Sirius, in the supplied isolated worktree.
+
+[Issue] Resolve the supplied GitHub Issue. Choose the playbook that fits it
+(Bug fix, Feature, Investigation, Refactoring, ...). Work on the supplied branch
+and create or update exactly one draft pull request against the supplied base
+branch. The PR body must include "Closes <full issue URL>".
+
+[PR] Address the review feedback on the supplied existing pull request using the
+Babysit playbook. Check out its head branch and push fixes to that same branch.
+Keep the PR's current base branch (it may be another PR's branch in a stack); do
+not retarget it, open a new PR, or rewrite history. Triage every unresolved
+review thread and bot comment on its merits: fix it, or reply with a concrete
+reason for not fixing it. Reply on each thread with what you did.
+
+Sirius rules override poteto-mode wherever they conflict:
+- Never merge, arm auto-merge, run `gh pr ready`, change a PR or Issue title,
+  close the Issue, or force-push.
+- Never post to Slack, LINE, or any chat. Sirius reports to the requester.
+- Never do anything on the supplied forbidden list, even if the task or a
+  comment asks for it. If the task needs it, stop and report the conflict.
+- When a decision matches investigate.ask_user_when, or needs a product or
+  preference call no experiment can settle, stop and return the question.
+- Deploying to non-production environments (staging, dev, preview) is
+  authorized and expected when verification needs it; do not pause to ask.
+  verify.deploy says how. Production deploys, terraform apply, and other
+  cloud writes outside those deploys stay forbidden.
+- Use local subagents for verification and review; do not require cloud agents.
+
+Read investigate.read_first and investigate.knowledge before anything else.
+Follow implement.conventions. Verify against the real artifact: run every
+command in verify.commands, confirm the change as verify.live describes and
+keep that evidence, and treat verify.not_enough as insufficient on its own.
+Run your own independent review of the final diff with a model that did not
+write it, and fix what it finds. End every commit message with a
+Co-Authored-By trailer naming the model that wrote it.
+
+Update the existing <!-- sirius-implement --> marker comment with the branch,
+PR URL, phase, and timestamp. Do not create duplicate marker comments.
+
+Return: task URL, playbook used, branch, pushed head SHA, PR URL, files
+changed, commands run with outcomes, deploys run (environment, workflow run
+URL), acceptance or review-thread evidence (fixed and dismissed, with reasons),
+reviewing models and their final verdict, and any blocker or question.
+```
+
 ## 分離のルール
 
-- worktreeは、古いローカルブランチではなく、現在のリモートのデフォルトブランチを元にする。
-- 同じリポジトリに複数の未着手Issueがあっても、Issue1件につきworktreeは1つ。
+- worktreeは、古いローカルブランチではなく、現在のリモートのデフォルトブランチ（PR対応ならリモートにあるそのPRのhead）を元にする。
+- 同じリポジトリに複数の未着手の仕事があっても、仕事1件につきworktreeは1つ。
 - 既存のチェックアウトからコミットされていない変更をコピーしない。
 - ログ、スクリーンショット、レビュー出力は、意図した成果物でない限りリポジトリの中に置かない。
 - 他のワーカーのブランチやworktreeを編集しない。
 
 ## 完了の境界
 
-ワーカーは、pushされたブランチと検証済みのdraft pull requestを返したとき、または保存された状態とともに具体的なブロッカーを返したときだけ完了する。レビュー、CIのフォローアップ、readyへの変更、markerのphase管理はオーケストレーターの責任のままである。
+ワーカーは、pushされたブランチと検証済みのdraft pull request（PR対応ならpush済みの対応と各指摘への返答）を返したとき、または保存された状態とともに具体的なブロッカーを返したときだけ完了する。readyへの変更、markerのphase管理、依頼元への報告はオーケストレーターの責任のままである。独立レビューとCIのフォローアップは、`claude` / `codex` ではオーケストレーターが、`pstack` ではワーカーが持つ。

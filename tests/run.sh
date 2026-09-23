@@ -152,5 +152,23 @@ rm -f "$SIRIUS_HOME/repos/acme__fast.yaml"
 check "guard asks on Write to settings" '
   print -r -- "{\"tool_name\":\"Write\",\"tool_input\":{\"file_path\":\"$SIRIUS_HOME/repos/x.yaml\"}}" | scripts/guard | grep -q "\"ask\""'
 
+# implementer: pstack hands work to pstack's poteto-agent, which reviews with its own models.
+sed "s#repo: acme/my-repo#repo: acme/pstk#; s/^  mode: manual/  mode: auto/" templates/repo.yaml > "$SIRIUS_HOME/repos/acme__pstk.yaml"
+check "implementer pstack validates" '
+  sed -i "" "s/^implementer: claude/implementer: pstack/; s/^reviewer: codex/reviewer: claude/" "$SIRIUS_HOME/config.yaml"
+  [[ $(bin/sirius-config repo acme/pstk | jget implement.implementer) == pstack ]]'
+check "implementer pstack keeps merge auto" '[[ $(bin/sirius-config repo acme/pstk | jget merge.mode) == auto ]]'
+check "unknown implementer rejected" '
+  sed -i "" "s/^implementer: pstack/implementer: cursor/" "$SIRIUS_HOME/config.yaml"
+  ! bin/sirius-config validate >/dev/null'
+sed -i "" "s/^implementer: cursor/implementer: claude/; s/^reviewer: claude/reviewer: codex/" "$SIRIUS_HOME/config.yaml"
+check "verify.deploy list resolves" '
+  sed -i "" "s#^  deploy: \[\]#  deploy: [\"STG: gh workflow run cd-staging.yml --ref <branch>\"]#" "$SIRIUS_HOME/repos/acme__pstk.yaml"
+  bin/sirius-config repo acme/pstk | grep -q "cd-staging.yml"'
+check "verify.deploy must be a list of strings" '
+  sed -i "" "s#^  deploy: .*#  deploy: {staging: x}#" "$SIRIUS_HOME/repos/acme__pstk.yaml"
+  bin/sirius-config validate | grep -q "verify.deploy must be a list"'
+rm -f "$SIRIUS_HOME/repos/acme__pstk.yaml"
+
 rm -rf "$SIRIUS_HOME"
 exit $fail

@@ -1,8 +1,9 @@
 # ~/.sirius/config.yaml — Siriusのグローバル設定。オペレーターが編集する。
 version: 1
 
-# 誰がコードを書き、誰がレビューするか（claude | codex）。
-# merge: auto にはこの2つが異なっていることが必要。
+# 誰がコードを書き、誰がレビューするか。implementer は claude | codex | pstack、reviewer は claude | codex。
+# merge: auto にはこの2つが異なっていることが必要（pstack は自分の中で別モデルのレビューを行うので対象外）。
+# pstack: 調査・実装・検証・本番以外へのデプロイ・既存PRへのレビュー対応を pstack:poteto-agent に任せる。
 implementer: claude
 reviewer: codex
 

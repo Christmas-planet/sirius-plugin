@@ -7,6 +7,17 @@ Slack / LINE ─▶ Issue ─▶ 実装（ドラフト PR）─▶ 独立レビ�
                          ▲ implement.gate                                 ▲ merge.mode
 ```
 
+### pstack に任せる（`implementer: pstack`）
+
+`~/.sirius/config.yaml` で `implementer: pstack` にすると、Sirius は受信・定期チェック・振り分け・返信・ゲートと記録だけを持ちます。調査・実装・検証・本番以外（STG など）へのデプロイ・レビュー対応は、仕事ごとに [pstack](https://github.com/michael-denyer/pstack-claude) の `pstack:poteto-agent` に渡します。poteto-agent は仕事に合う playbook（Bug fix、Feature、Investigation、既存 PR へのレビュー対応なら Babysit）を自分で選びます。
+
+- Slack/LINE の依頼が既存の PR へのレビュー対応なら、Issue を作らずその PR のブランチに直接対応を push し、各指摘に返答します。
+- 本番以外の環境へのデプロイは確認なしで行います。方法はリポジトリ設定の `verify.deploy` に書きます。本番へのデプロイとリポジトリの `forbidden` は禁止のままです。
+- マージ、`[implement]` / `[merge]` のゲート、依頼元への返信は Sirius が持ち、pstack にはさせません。
+- 作業が ready になったら、依頼元の会話へ1通だけ報告を返します。
+
+pstack は Claude Code のプラグインまたは skills ディレクトリとして入れておきます。画面や CLI の動作確認には cursor-team-kit の `control-ui` / `control-cli` と `deslop` を使います（`apm install -g cursor/plugins/cursor-team-kit/skills/<name>`）。
+
 ## インストール
 
 ```text
@@ -79,7 +90,7 @@ workspace が持つソースは1回だけ読まれ、依頼ごとに影響する
 
 ### `merge.mode: auto` の条件
 
-- 実装とレビューが別のモデルであること（`implementer` と `reviewer`。リポジトリの `review.reviewer` があればそちらを優先）
+- 実装とレビューが別のモデルであること（`implementer` と `reviewer`。リポジトリの `review.reviewer` があればそちらを優先。`implementer: pstack` では pstack 自身が別モデルでレビューするので対象外）
 - 今の head・今の base 先端に対する独立検証の判定コメントが PASS（または `human_only` でない PASS+NOTES）であり、検証したモデルが実装したモデルと重ならないこと
 - head が base の先端に載っていて、衝突がないこと
 - CI がすべて成功していること

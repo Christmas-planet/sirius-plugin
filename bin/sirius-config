@@ -34,6 +34,10 @@ MERGE_MODES = ["manual", "auto"]
 REPLY_MODES = ["draft", "send"]
 SCHEDULERS = ["none", "loop", "launchd", "monitor"]
 AGENTS = ["claude", "codex"]
+# pstack: each task goes to pstack's poteto-agent, which picks its own playbook
+# (investigate, fix, babysit an existing PR, verify) and brings its own independent
+# review, so it only implements; reviewer stays claude or codex for merge verdicts.
+IMPLEMENTERS = AGENTS + ["pstack"]
 
 GLOBAL_DEFAULTS = {
     "version": 1,
@@ -108,7 +112,8 @@ def load_global():
     cfg["reply"] = {**GLOBAL_DEFAULTS["reply"], **(data.get("reply") or {})}
     errors = []
     for key, allowed in (("implement_gate", IMPLEMENT_GATES), ("merge", MERGE_MODES),
-                         ("scheduler", SCHEDULERS), ("implementer", AGENTS), ("reviewer", AGENTS)):
+                         ("scheduler", SCHEDULERS), ("implementer", IMPLEMENTERS),
+                         ("reviewer", AGENTS)):
         if cfg[key] not in allowed:
             errors.append(f"{path}: {key} must be one of {allowed}")
     if cfg["reply"].get("mode") not in REPLY_MODES:
@@ -264,6 +269,7 @@ def validate_repo(path, data):
         errors.extend(_str_list_errors(path, "verify.commands", verify.get("commands")))
         errors.extend(_dict_list_errors(path, "verify.live", verify.get("live"), {"how", "evidence"}))
         errors.extend(_str_list_errors(path, "verify.not_enough", verify.get("not_enough")))
+        errors.extend(_str_list_errors(path, "verify.deploy", verify.get("deploy")))
 
     errors.extend(validate_merge(path, data.get("merge") or {}))
     errors.extend(_str_list_errors(path, "forbidden", data.get("forbidden")))
@@ -292,7 +298,7 @@ def resolve(glob, path, data):
     # resolved "review" block below uses), so the "different model" check must compare
     # against the model that will actually review this repo, not always the global one.
     effective_reviewer = (data.get("review") or {}).get("reviewer") or glob["reviewer"]
-    if merge_mode == "auto" and glob["implementer"] == effective_reviewer:
+    if merge_mode == "auto" and glob["implementer"] != "pstack" and glob["implementer"] == effective_reviewer:
         merge_mode = "manual"
         notes.append("merge auto needs a reviewer model different from the implementer; using 'manual'")
 
@@ -332,6 +338,7 @@ def resolve(glob, path, data):
         },
         "implement": {
             "gate": gate,
+            "implementer": glob["implementer"],
             "conventions": implement.get("conventions") or [],
             "model": glob["implementer_model"],
             "effort": glob["implementer_effort"],
@@ -346,6 +353,7 @@ def resolve(glob, path, data):
             "commands": verify.get("commands") or [],
             "live": verify.get("live") or [],
             "not_enough": verify.get("not_enough") or [],
+            "deploy": verify.get("deploy") or [],
         },
         "merge": merge_block,
         "forbidden": data.get("forbidden") or [],

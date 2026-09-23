@@ -34,6 +34,8 @@ verify:
   commands: []                 # 検証の一環として実行する任意のシェルコマンド
   live: []                     # 任意の自由記述。例: [{how: "iOSシミュレータ", evidence: "スクリーンショット"}]
   not_enough: []               # 任意の自由記述リスト。例: ["ビルドログだけでは画面表示の証拠にならない"]
+  deploy: []                   # 任意の自由記述リスト。検証で使う本番以外の環境へのデプロイ方法。ワーカーは確認なしで実行してよい。
+                                # 例: ["STG: gh workflow run cd-staging.yml -R acme/my-repo --ref <branch>"]
 
 merge:
   mode: manual                 # manual: 人がマージする; auto: すべてのチェックが通ればsirius-mergeがマージする

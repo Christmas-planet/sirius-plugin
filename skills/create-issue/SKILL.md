@@ -60,6 +60,10 @@ FYIや了解の返事、解決済みの項目、成功の通知、チャット�
 - 公開リポジトリでは、加えて私的なパーマリンク、チャット名、顧客名、内部ホスト名、抜粋も取り除く。残った内容で行動できないなら `confirmation_required` を、想定する文面を添えて返す。
 - 引用ではなく言い換える。
 
+## 既存PRへの対応（`target.kind: pr`）
+
+Issueは作らない。`gh pr view <url> --json state,isDraft,headRefName,baseRefName,author` でPRがオープンで、パケットの `repo` のものであることを確かめる。`forbidden` と `investigate.ask_user_when` の確認は1件のときと同じ。そのPRにすでに生きている `<!-- sirius-implement -->` marker（phaseが `working` か `waiting`）があれば `duplicate` を、無ければ `pr_task` を返す。markerの作成と着手の判断は `implement` が行う。
+
 ## 重複排除
 
 作成する前に、対象リポジトリのオープンIssueを次の観点で検索する:
@@ -114,9 +118,10 @@ Siriusはラベルを使わない。タイトルにある唯一の状態は `[im
 ## 返す状態は必ず1つ（パケットごと）
 
 ```yaml
-status: created | duplicate | not_actionable | confirmation_required | blocked
+status: created | duplicate | pr_task | not_actionable | confirmation_required | blocked
 repo: <owner/repo>
 issue: <number and URL>          # created, duplicate
+pr: <URL>                        # pr_task、既存PRへのduplicate
 reason: <short evidence>         # not_actionable, blocked
 reply_only: <bool>               # not_actionable のとき: チャットの返信だけで済む質問・確認・日程調整なら true
 confirmation_id: <stable id>     # confirmation_required

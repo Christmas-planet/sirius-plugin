@@ -23,7 +23,7 @@ description: 各リポジトリのmerge設定に従って、readyになったSir
 PRごとに:
 
 1. `sirius-merge check <repo> <pr>`（読み取り専用）。判定や承認の欠落以外の問題を報告したら、Siriusが持てる範囲を直し（baseへのrebase、CI待ちなど）、残りは報告する。
-2. 今のheadに対するレビュー判定が無ければ、実装役ではなく設定された `reviewer`（そのリポジトリの `review.reviewer` があればそちらを優先する）で検証を実行する。4つのレーンを使う:
+2. 今のheadに対するレビュー判定が無ければ、実装役ではなく設定された `reviewer`（そのリポジトリの `review.reviewer` があればそちらを優先する）で検証を実行する。`implementer: pstack` なら、この検証もpstackの `pstack:poteto-agent` にShipping playbookの手順1〜3（PRごとの独立した検証とその判定のpatch-id照合）だけを頼み、マージはさせない。検証モデルはコミットのCo-Authored-Byにあるモデルと重ならないものを指定する。4つのレーンを使う:
    - `gates`: リポジトリのチェックを再実行する;
    - `live`: 実画面やエンドポイントで変更を確認し、証跡ファイルを `~/.sirius/evidence/` に保存する。対象リポジトリの `verify.live` に確認方法が書かれていればそれに従い、`verify.not_enough` に挙がっている証跡だけでは不十分として扱う;
    - `audit`: 差分と証跡をIssueの受入条件と突き合わせる;
