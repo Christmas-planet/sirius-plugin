@@ -33,9 +33,11 @@ Slack / LINE ─▶ Issue ─▶ 実装（ドラフト PR）─▶ 独立レビ�
 
 ```
 ~/.sirius/
-  config.yaml                       全体: 実装役とレビュー役、上限、スケジューラ、レビュー用アカウント
+  config.yaml                       全体: 実装役とレビュー役、上限、スケジューラ
   repos/<owner>__<repo>.yaml        リポジトリごと: dir、sources、reply、investigate、
                                      implement、review、verify、merge、forbidden
+  workspaces/<name>.yaml            任意。同じ依頼元を共有する複数リポジトリの束:
+                                     dir、repos、sources、reply、notes
   state/ runs/ locks/                実行状態
   STOP                               あれば全停止
 ```
@@ -46,6 +48,17 @@ Slack / LINE ─▶ Issue ─▶ 実装（ドラフト PR）─▶ 独立レビ�
 
 - `.claude/` 配下を自由に編集できないチームでも使えるようにするため。
 - エージェントが自分の PR で自分のゲートを緩める経路を作らないため。
+
+### workspace（複数リポジトリで同じ依頼元を共有するとき）
+
+同じ Slack チャンネルや LINE チャットから、frontend・backend・infra のように複数リポジトリ向けの依頼が来ることがあります。ソースをそれぞれのリポジトリ設定に書くと、同じメッセージが何度も読まれ、Issue と返信が重複します。そこで、1つのソースを書けるのは1か所（リポジトリか workspace）だけにしてあり、重複は `sirius-config` がエラーにします。
+
+workspace が持つソースは1回だけ読まれ、依頼ごとに影響するメンバーのリポジトリ（1つのことも全部のこともある）へ振り分けられます。
+
+- リポジトリごとに1件ずつ Issue を立て、同じ依頼の Issue 同士を `## Related` 節でリンクする。順序が必要なら `Depends on owner/repo#N` を書き、依存先がクローズされるまで実装に着手しない。
+- どのリポジトリか確信が持てないときは推測せず、確認待ちにしてあなたに聞く。
+- 依頼者への返信は、何件に分かれても1通だけ（workspace の `reply` に従う）。
+- 実装・レビュー・マージのゲートは各リポジトリの設定のまま。
 
 ひな形は [templates/](templates/) にあります。
 

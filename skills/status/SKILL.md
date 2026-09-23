@@ -7,7 +7,7 @@ description: Siriusの状態を読み取り専用で表示する - リポジト�
 
 読み取り専用。どこにも書き込まない。
 
-1. `sirius-config show`: リポジトリごとに、リポジトリ名、ソース、実効的な `implement.gate` / `merge.mode` / `reply.mode`、`downgrades` の理由をすべて表示する。設定エラーがあれば先に見せる。
+1. `sirius-config show`: リポジトリごとに、リポジトリ名、ソース、実効的な `implement.gate` / `merge.mode` / `reply.mode`、`downgrades` の理由をすべて表示する。 workspaceがあれば、名前、メンバーのリポジトリ、持っているソース、実効的な `reply.mode` も表示する。設定エラーがあれば先に見せる。
 2. 対象範囲にあるリポジトリごとの `sirius-lease status --scope repo:<owner/repo>`、`sirius-lease status --scope line`、そして `~/.sirius/STOP` の有無。機械全体を1本でロックする「run」スコープはもう無い。
 3. `~/.sirius/state/intake/` 配下のチェックポイント: ソースごとの最終完了カットオフと、保留中の質問があれば一言一句そのまま。
 4. リポジトリごとに `gh` で:

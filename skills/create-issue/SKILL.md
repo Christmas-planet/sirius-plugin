@@ -1,12 +1,12 @@
 ---
 name: create-issue
-description: Sirius取り込みからのアクションパケット1件を検証し、機微な内容を取り除き、重複を検索して、証跡付きのGitHub Issueを最大1件作成する。チャットソースは読まず、実装も行わない。
+description: Sirius取り込みからのアクションパケット1件（workspaceのソースでは同じ依頼から分けたパケットのグループ）を検証し、機微な内容を取り除き、重複を検索して、パケットごとに証跡付きのGitHub Issueを最大1件作成し、同じ依頼のIssue同士をリンクする。チャットソースは読まず、実装も行わない。
 user-invocable: false
 ---
 
 # Issue作成
 
-アクションパケット1件を、最大1件のGitHub Issueに変換する。ソーススキルはメッセージを集めるだけで、Issueへの書き込みはすべてこのスキルが持つ。
+アクションパケット1件を、最大1件のGitHub Issueに変換する。workspace のソースからは、同じ依頼をリポジトリごとに分けたパケットのグループ（共通の `request_group`）がまとめて渡される。そのときも1パケット=最大1件で、下の「グループ」の手順でまとめて扱う。ソーススキルはメッセージを集めるだけで、Issueへの書き込みはすべてこのスキルが持つ。
 
 ## ツール
 
@@ -32,7 +32,25 @@ FYIや了解の返事、解決済みの項目、成功の通知、チャット�
 
 ## リポジトリ
 
-パケットの `repo` は、渡された凍結済み設定がすでに指す1つのリポジトリと一致している。設定ファイルは1リポジトリにつき1ファイルなので、複数候補から選ぶ必要はない。渡された `repo` 以外のリポジトリに作成したり、カレントディレクトリのリモートにフォールバックしたりは絶対にしない。
+パケットの `repo` は、そのソースの持ち主が許す範囲の1つのリポジトリでなければならない: リポジトリが持つソースならそのリポジトリ、workspace が持つソースならその workspace のメンバー（`candidate_repos`）のどれか。範囲外なら `blocked` を返す。渡された `repo` 以外のリポジトリに作成したり、カレントディレクトリのリモートにフォールバックしたりは絶対にしない。
+
+`repo: null` のパケット（取り込み側が振り分けに確信を持てなかったもの）は、検索も本文作成もせず `confirmation_required` を返す。質問は「この依頼をどのリポジトリで対応するか」、`options` は `candidate_repos` の各リポジトリと、複数にまたがる場合の組み合わせ、それぞれの根拠。回答が来たら、取り込み側がその回答どおりにパケットを分け直して再度渡す。
+
+## グループ（workspace のソース）
+
+1. `depends_on` に従って、依存される側から順に処理する。各パケットの検証・私的データ・重複排除は1件のときと同じ。
+2. 本文の末尾（markerコメントの前）に次の節を足す。同じグループで先に作成・重複判定済みのIssueはリンクを書く。
+
+   ```md
+   ## Related
+   - 同じ依頼: owner/repo#<n>, owner/repo#<n>
+   - Depends on owner/repo#<n>
+   ```
+
+   `Depends on` の行は `depends_on` にあるリポジトリのIssueについてだけ書く。`implement` スキルはこの行を依存関係として読み、依存先がクローズされるまで着手しない。
+3. 全パケットが終わったら、先に作ったIssueの `## Related` に、後から作ったIssueへのリンクを `gh issue edit -R owner/repo --body-file` で追記する。既存の本文は変えない。
+4. どれかが `confirmation_required` になったら、そのグループの残りは処理せず止める（先に作成したものはそのまま残し、結果に含める）。回答後に残りを処理する。
+5. `[implement]` を付けるかどうかはパケットごとに、そのリポジトリの `implement.gate` で決める。依存しているIssueにも付けてよい。着手の順序は `Depends on` の行が守る。
 
 ## 私的データを守る
 
@@ -93,7 +111,7 @@ Siriusはラベルを使わない。タイトルにある唯一の状態は `[im
 
 `gh issue create` で作成した後、取り直して、リポジトリ、番号、状態、タイトル、URLを確認する。この確認が通るまで `created` を報告しない。
 
-## 返す状態は必ず1つ
+## 返す状態は必ず1つ（パケットごと）
 
 ```yaml
 status: created | duplicate | not_actionable | confirmation_required | blocked
@@ -106,5 +124,7 @@ question: <one question>
 options: [{value: <choice>, evidence: <why>}]
 pending_packet: <the unchanged packet>
 ```
+
+グループのときは、パケットごとの結果を `request_group` とともに並べて返す。
 
 `confirmation_required` のときは、それ以上検索も本文の作成もせずに止まる。ユーザーがスキップを選んだら、次回の呼び出しは `not_actionable`（reason: `user_skipped`）を返す。

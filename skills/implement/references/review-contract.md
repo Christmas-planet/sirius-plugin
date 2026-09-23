@@ -32,4 +32,4 @@ For each finding, report severity, file and line, evidence, impact, and the smal
 
 ## クリーンなレビューの証跡
 
-レビューしたheadのSHA、baseブランチとSHA、レビュワー、日時、クリーンな最終判定を、Issueの単一のmarkerコメントに記録する。`merge.mode: auto` のリポジトリでは、mergeスキルがこれをレビュー用アカウントが投稿する判定に変換する。後から新しいコミットがpushされると、この証跡は無効になる。
+レビューしたheadのSHA、baseブランチとSHA、レビュワー、日時、クリーンな最終判定を、Issueの単一のmarkerコメントに記録する。`merge.mode: auto` のリポジトリでは、mergeスキルがこれを `sirius-merge verdict` の判定コメントに変換する。後から新しいコミットがpushされると、この証跡は無効になる。

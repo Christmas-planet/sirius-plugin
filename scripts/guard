@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 
 SIRIUS = Path(os.environ.get("SIRIUS_HOME", Path.home() / ".sirius")).expanduser()
-PROTECTED = [SIRIUS / "config.yaml", SIRIUS / "repos"]
+PROTECTED = [SIRIUS / "config.yaml", SIRIUS / "repos", SIRIUS / "workspaces"]
 
 BASH_RULES = [
     (re.compile(r"\bgh\s+pr\s+merge\b"),

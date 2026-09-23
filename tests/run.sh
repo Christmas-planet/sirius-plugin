@@ -56,6 +56,31 @@ check "unknown top-level key rejected" '
   ! bin/sirius-config validate >/dev/null'
 sed -i "" "/^name: leftover/d" "$SIRIUS_HOME/repos/acme__my-repo.yaml"
 
+# Workspaces: sources shared by several repos. acme/api gets its own distinct sources.
+mkdir -p "$SIRIUS_HOME/workspaces"
+sed "s#repo: acme/my-repo#repo: acme/api#; s/C0123456789/C0000000API/; s/正確なチャット名/api-chat/" templates/repo.yaml > "$SIRIUS_HOME/repos/acme__api.yaml"
+ws() { sed "s#acme/web#acme/my-repo#; s/C0123456789/C0000000WS1/; $1" templates/workspace.yaml > "$SIRIUS_HOME/workspaces/${2:-acme-suite}.yaml"; }
+check "workspace template validates" '
+  ws "" && bin/sirius-config validate | grep -q "\"acme-suite\""'
+check "repo reports its workspace" '[[ $(bin/sirius-config repo acme/api | jget workspace) == acme-suite ]]'
+check "workspace lookup by name" 'bin/sirius-config workspace acme-suite | grep -q "\"acme/my-repo\""'
+check "source listed in a workspace and a member repo is rejected" '
+  ws "s/C0000000WS1/C0123456789/" && bin/sirius-config validate | grep -q "is listed in both"'
+check "source listed in two repos is rejected" '
+  ws "" && sed "s#repo: acme/my-repo#repo: acme/dup#" templates/repo.yaml > "$SIRIUS_HOME/repos/acme__dup.yaml"
+  bin/sirius-config validate | grep -q "is listed in both"'
+rm -f "$SIRIUS_HOME/repos/acme__dup.yaml"
+check "workspace member needs a repo file" '
+  ws "s#acme/api#acme/ghost#" && bin/sirius-config validate | grep -q "has no file in repos/"'
+check "workspace file name must match its name" '
+  ws "" other && bin/sirius-config validate | grep -q "file name must be acme-suite.yaml"'
+rm -f "$SIRIUS_HOME/workspaces/other.yaml"
+check "workspace reply send is capped by config.yaml" '
+  ws "s/^  mode: draft/  mode: send/" && bin/sirius-config workspace acme-suite | grep -q "reply capped at .draft. by config.yaml"'
+check "guard asks on Write to a workspace" '
+  print -r -- "{\"tool_name\":\"Write\",\"tool_input\":{\"file_path\":\"$SIRIUS_HOME/workspaces/x.yaml\"}}" | scripts/guard | grep -q "\"ask\""'
+rm -rf "$SIRIUS_HOME/workspaces" "$SIRIUS_HOME/repos/acme__api.yaml"
+
 check "lease excludes a second run" 'bin/sirius-lease acquire a >/dev/null && ! bin/sirius-lease acquire b >/dev/null'
 check "lease release by owner only" '! bin/sirius-lease release b >/dev/null && bin/sirius-lease release a >/dev/null'
 check "lease scopes are independent" '

@@ -1,6 +1,6 @@
 ---
 name: intake-slack
-description: ~/.sirius/repos/*.yamlに列挙されたSlackチャンネルを凍結された時間窓だけ読み、未解決の依頼をcreate-issue経由で重複排除しつつGitHub Issueにし、reply.modeに従って依頼者へ自然な返信を下書きまたは送信する。Sirius runスキルから呼ばれるほか、1つのリポジトリ向けに単独でも使える。
+description: ~/.sirius/repos/*.yamlと~/.sirius/workspaces/*.yamlに列挙されたSlackチャンネルを凍結された時間窓だけ読み、未解決の依頼を（workspaceのソースなら影響するリポジトリごとに振り分けて）create-issue経由で重複排除しつつGitHub Issueにし、reply.modeに従って依頼者へ自然な返信を下書きまたは送信する。Sirius runスキルから呼ばれるほか、1つのリポジトリかworkspace向けに単独でも使える。
 user-invocable: false
 ---
 
@@ -38,4 +38,4 @@ Slackは読み取り専用のまま扱う: リアクション、編集、既読�
 文面は[返信契約](../../references/reply-contract.md)に従って書く。Slackでは、依頼メッセージのスレッドに返す（依頼がスレッド内の返信ならその `thread_ts`、親メッセージならその `ts` を `thread_ts` にする）。チャンネルに直接投稿しない。
 
 - `draft`: `slack_send_message_draft` が使えるならその文面で同じスレッドへの下書きを作る。使えなければIssueかこの実行のレポートに書く。
-- `send`: `slack_send_message` で、凍結済みリポジトリ表にある正確なチャンネルIDとスレッドの `thread_ts` を指定して投稿する。取れれば投稿の `permalink` を実行レポートに記録する。送信に失敗したら再送を繰り返さず、`draft` と同じ扱いにしてレポートに書く。
+- `send`: `slack_send_message` で、凍結済みの表にある正確なチャンネルIDとスレッドの `thread_ts` を指定して投稿する。取れれば投稿の `permalink` を実行レポートに記録する。送信に失敗したら再送を繰り返さず、`draft` と同じ扱いにしてレポートに書く。

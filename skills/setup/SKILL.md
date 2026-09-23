@@ -1,12 +1,12 @@
 ---
 name: setup
-description: 現在のディレクトリのリポジトリをSiriusへ登録する、またはグローバル設定を作る。~/.sirius/config.yamlと~/.sirius/repos/<owner>__<repo>.yamlを対話的に書き、オペレーターにしかできない作業（権限、スケジューラ）のチェックリストを表示する。merge: autoは別GitHubアカウントを使わず、実装役とは別モデルの独立検証をゲートにする。/sirius:setupに使う。
+description: 現在のディレクトリのリポジトリ（または複数リポジトリを束ねるworkspace）をSiriusへ登録する、またはグローバル設定を作る。~/.sirius/config.yaml、~/.sirius/repos/<owner>__<repo>.yaml、~/.sirius/workspaces/<name>.yamlを対話的に書き、オペレーターにしかできない作業（権限、スケジューラ）のチェックリストを表示する。merge: autoは別GitHubアカウントを使わず、実装役とは別モデルの独立検証をゲートにする。/sirius:setupに使う。
 disable-model-invocation: true
 ---
 
 # Sirius setup
 
-セットアップは対話的に行う。`~/.sirius/config.yaml` や `~/.sirius/repos/` への書き込みはすべてWriteかEditツールを通し、guard hookがユーザーに承認を求める。これらのファイルをシェルから書かない。プロジェクトのリポジトリの中には何も書かない。
+セットアップは対話的に行う。`~/.sirius/config.yaml`、`~/.sirius/repos/`、`~/.sirius/workspaces/` への書き込みはすべてWriteかEditツールを通し、guard hookがユーザーに承認を求める。これらのファイルをシェルから書かない。プロジェクトのリポジトリの中には何も書かない。
 
 ## 1. グローバル設定（初回だけ）
 
@@ -20,12 +20,12 @@ disable-model-invocation: true
 
 ## 2. このリポジトリを登録する
 
-1. 現在のディレクトリで `git remote get-url origin` を読む。`owner/repo` に変換し、`gh repo view` で確認する。gitリポジトリでなく、複数の子リポジトリを束ねる親ディレクトリ（ワークスペース）だった場合は、直下の子ディレクトリごとに `git -C <子> remote get-url origin` を読み、どのリポジトリを登録するかをユーザーに選ばせる。`dir` には親ではなく各子リポジトリのパスを入れる。既存の設定の `dir` が親ディレクトリを指していたら、正しい子リポジトリのパスに直すよう提案する。
+1. 現在のディレクトリで `git remote get-url origin` を読む。`owner/repo` に変換し、`gh repo view` で確認する。gitリポジトリでなく、複数の子リポジトリを束ねる親ディレクトリ（ワークスペース）だった場合は、直下の子ディレクトリごとに `git -C <子> remote get-url origin` を読み、どのリポジトリを登録するかをユーザーに選ばせる。`dir` には親ではなく各子リポジトリのパスを入れる。既存の設定の `dir` が親ディレクトリを指していたら、正しい子リポジトリのパスに直すよう提案する。選んだリポジトリが同じ依頼元を共有するなら、続けて2bでworkspaceを作る。
 2. `sirius-config repo <owner/repo>` を実行する。すでに設定ファイルがあれば、それを見せて編集を提案する。新規に作る代わりに。1つのリポジトリにつき設定ファイルは1つだけ。
 3. ソースとゲートを尋ねる:
    - Slack: 正確なワークスペースID（`T…`）とチャンネルID（`C…`）。Slackコネクタが使えるときは、ユーザーが選べるようチャンネル一覧を出す。名前やワイルドカードは対象にならない。
    - LINE: アプリに表示されている通りの正確なチャット名（このMacだけ）。
-   - 1つのソース（Slackチャンネル・LINEチャット）は1つのリポジトリにだけ書く。同じソースを複数のリポジトリ設定に書くと、取り込みがリポジトリごとに走り、同じ依頼から重複したIssueが立ち、依頼者へ重複して返信する。関連リポジトリが同じチャンネルを共有しているなら、主となる1つのリポジトリにだけソースを置き、他はソースを空にする。他のリポジトリ向けのIssueは手で立てる。
+   - 1つのソース（Slackチャンネル・LINEチャット）を書けるのは1か所だけ（リポジトリかworkspace）。複数のリポジトリ設定に同じソースを書くと、同じ依頼から重複したIssueが立ち、依頼者へ重複して返信するので、`sirius-config` がエラーにする。関連リポジトリが同じチャンネルを共有しているなら、ソースはリポジトリ設定ではなく下の「workspaceを登録する」に書く。
    - `implement.gate`: `human` は人がIssueタイトルの先頭に `[implement]` を付けてからSiriusが実装することを意味する。`auto` は、受入条件がはっきりしているIssueにSirius自身が作成時から接頭辞を付けることを意味する。
    - `merge.mode`: `manual` は人がreadyなPRのタイトル先頭に `[merge]` を付け、その後Siriusがマージすることを意味する。`auto` は、実装役とは別モデルによる独立検証の判定（PASS）、CI、baseブランチの条件がすべて揃ったときにSiriusがマージすることを意味する。承認は同一GitHubアカウントで行い、別のレビュー用アカウントは使わない。
    - `reply.mode`: `draft` はSiriusが送信せず提案文をIssue/レポートに書くだけ。`send` はSiriusが実際に返信する（Slackは `slack_send_message`、LINEはComputer Useでのアプリ操作）。返信は、オペレーター本人がその会話で過去に送った文面に合わせた自然な日本語で書く。`reply.style` に文体Skill名（例: `write-like-kazuki`）か自由記述の指示を、`reply.never` に絶対に言わないことを書ける。
@@ -36,6 +36,16 @@ disable-model-invocation: true
 
 Siriusはラベルを作らない。状態はタイトル接頭辞の `[implement]` / `[merge]`、Issueのmarkerコメント、PRのdraft/ready状態にある。
 
+## 2b. workspaceを登録する（複数リポジトリが同じ依頼元を共有するとき）
+
+親ディレクトリに複数のリポジトリがあり、同じSlackチャンネルやLINEチャットから、そのどれか・いくつかに向けた依頼が来る場合に使う。
+
+1. メンバーの各リポジトリを先に2の手順で登録する（ソースは空にする）。
+2. 共有ソースがすでにどれかのリポジトリ設定に書かれていたら、そこから外してworkspaceへ移すことを提案する（同じソースを両方に書くとエラーになる）。移しても、そのソースのチェックポイントは新しく始まるので、最初の実行はその日の分から読み直す。
+3. [テンプレート](../../templates/workspace.yaml)から `~/.sirius/workspaces/<name>.yaml` を書く。`name` はファイル名と同じ小文字英数字とハイフン。`dir` は親ディレクトリ、`repos` はメンバー、`sources` は共有ソース、`reply` は依頼者への返信の設定（リポジトリ設定の `reply` と同じ意味）。
+4. `notes` には振り分けの手がかりを書くよう勧める: どんな依頼がどのリポジトリに関わるか（例: 画面・文言はfrontend、API・DBはbackend、クラウド構成はinfra）。
+5. `sirius-config validate` と `sirius-config workspace <name>` で結果を見せる。
+
 ## 3. オペレーターのチェックリスト
 
 該当する手順を、正確なコマンド付きのチェックリストとして表示する。エージェント自身はこれらを行わない: guard hookがルールセットの変更を拒否し、自動モードは設定ファイルへの書き込みを拒否する。
@@ -43,7 +53,7 @@ Siriusはラベルを作らない。状態はタイトル接頭辞の `[implemen
 **常に**
 
 - `~/.claude/settings.json` の `permissions.deny` に追加: `Bash(gh pr merge:*)`、`Bash(git push --force:*)`、`Bash(git push -f:*)`。プラグインはこれらの権限ルールを同梱できず、guard hookはあくまで補助。
-- 自動モードを使うなら、対象範囲のすべてのリポジトリを自動モードの `environment` に列挙する。さもないと、分類器が知らないリポジトリで正当な作業を拒否することがある。
+- 自動モードを使うなら、対象範囲のすべてのリポジトリ（workspaceのメンバーを含む）を自動モードの `environment` に列挙する。さもないと、分類器が知らないリポジトリで正当な作業を拒否することがある。
 
 **いずれかのリポジトリが `merge.mode: auto` を使うとき**
 

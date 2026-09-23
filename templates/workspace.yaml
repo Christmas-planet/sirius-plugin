@@ -1,0 +1,24 @@
+# ~/.sirius/workspaces/<name>.yaml — 同じSlackチャンネル/LINEチャットを共有する複数リポジトリの束。任意。
+# ファイル名は name と同じにする。例: name "acme-suite" -> acme-suite.yaml
+# 1つの依頼は1回だけ読まれ、影響するメンバーのリポジトリ（1つ〜全部）それぞれにIssueが立ち、依頼者への返信は1回だけ。
+# 実装・レビュー・マージのゲートは各リポジトリの設定に従う。
+name: acme-suite
+dir: ~/projects/acme-suite       # 任意。メンバーのチェックアウトを束ねる親ディレクトリ
+
+repos:                           # repos/ に設定ファイルがあるリポジトリだけ。1つのリポジトリは1つのworkspaceにだけ属せる
+  - acme/web
+  - acme/api
+
+sources:                         # ここに書いたソースは、メンバーのリポジトリ設定に重ねて書かない（1ソースにつき1か所）
+  slack:
+    - {workspace: T0123456789, channel: C0123456789}
+  line: []
+
+reply:                           # 依頼者への返信。意味はリポジトリ設定の reply と同じ
+  mode: draft
+  style: ""
+  never: []
+
+notes: |
+  振り分けの手がかり。どの種類の依頼がどのリポジトリに関わるか。
+  例: 画面・文言は acme/web、API・DBは acme/api。新しい項目の追加は両方。

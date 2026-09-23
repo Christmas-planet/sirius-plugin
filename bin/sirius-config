@@ -3,11 +3,15 @@
 
 Global: ~/.sirius/config.yaml
 Repos:  ~/.sirius/repos/<owner>__<repo>.yaml   (one file per GitHub repository)
+Workspaces: ~/.sirius/workspaces/<name>.yaml (optional; sources shared by several repos)
 
 Investigation method, review approach, and verification method are decided per
 repository, so the unit of configuration is one repository, not an abstract
-"project". A repo file is keyed by its own `repo: owner/repo` field, and the
-file name must equal that repo lowercased with "/" replaced by "__".
+"project". A workspace groups repos that share one Slack channel or LINE chat:
+it owns those sources and the reply, and intake routes each request to the
+member repos it affects. Every source has exactly one owner. A repo file is
+keyed by its own `repo: owner/repo` field, and the file name must equal that
+repo lowercased with "/" replaced by "__".
 
 Gate settings (implement.gate, merge.mode, reply.mode) resolve to the stricter
 of the global ceiling in config.yaml and the repo's own value. Nothing inside
@@ -17,6 +21,7 @@ a project repository is read, so a PR cannot loosen its own gate.
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -53,6 +58,8 @@ REPO_KEYS = {
 SOURCE_KINDS = {"slack", "line"}
 RULE_KEYS = {"ci_required", "approvals", "human_branches", "deploys", "deploy_workflows"}
 MERGE_KEYS = RULE_KEYS | {"mode"}
+WORKSPACE_KEYS = {"name", "dir", "repos", "sources", "reply", "notes"}
+WORKSPACE_NAME = re.compile(r"[a-z0-9][a-z0-9-]*")
 
 
 class ConfigError(Exception):
@@ -169,6 +176,38 @@ def validate_merge(path, merge):
     return errors
 
 
+def validate_sources(path, sources):
+    errors = []
+    sources = sources or {}
+    if not isinstance(sources, dict):
+        return [f"{path}: sources must be a mapping"]
+    for kind, entries in sources.items():
+        if kind not in SOURCE_KINDS:
+            errors.append(f"{path}: unknown source kind {kind!r}")
+            continue
+        for e in entries or []:
+            if kind == "slack" and not (isinstance(e, dict) and e.get("workspace") and e.get("channel")):
+                errors.append(f"{path}: slack entry needs exact workspace and channel IDs: {e!r}")
+            if kind == "line" and not (isinstance(e, dict) and e.get("chat")):
+                errors.append(f"{path}: line entry needs an exact chat title: {e!r}")
+            if isinstance(e, dict) and any("*" in str(v) for v in e.values()):
+                errors.append(f"{path}: wildcards do not grant scope: {e!r}")
+    return errors
+
+
+def validate_reply(path, reply):
+    reply = reply or {}
+    if not isinstance(reply, dict):
+        return [f"{path}: reply must be a mapping"]
+    errors = []
+    if "mode" in reply and reply["mode"] not in REPLY_MODES:
+        errors.append(f"{path}: reply.mode must be one of {REPLY_MODES}")
+    if "style" in reply and not isinstance(reply["style"], str):
+        errors.append(f"{path}: reply.style must be a string")
+    errors.extend(_str_list_errors(path, "reply.never", reply.get("never")))
+    return errors
+
+
 def validate_repo(path, data):
     errors = []
     if not isinstance(data, dict):
@@ -186,32 +225,8 @@ def validate_repo(path, data):
         if path.stem != expected_stem:
             errors.append(f"{path}: file name must be {expected_stem}.yaml (derived from repo {repo!r})")
 
-    sources = data.get("sources") or {}
-    if not isinstance(sources, dict):
-        errors.append(f"{path}: sources must be a mapping")
-        sources = {}
-    for kind, entries in sources.items():
-        if kind not in SOURCE_KINDS:
-            errors.append(f"{path}: unknown source kind {kind!r}")
-            continue
-        for e in entries or []:
-            if kind == "slack" and not (isinstance(e, dict) and e.get("workspace") and e.get("channel")):
-                errors.append(f"{path}: slack entry needs exact workspace and channel IDs: {e!r}")
-            if kind == "line" and not (isinstance(e, dict) and e.get("chat")):
-                errors.append(f"{path}: line entry needs an exact chat title: {e!r}")
-            if isinstance(e, dict) and any("*" in str(v) for v in e.values()):
-                errors.append(f"{path}: wildcards do not grant scope: {e!r}")
-
-    reply = data.get("reply") or {}
-    if not isinstance(reply, dict):
-        errors.append(f"{path}: reply must be a mapping")
-        reply = {}
-    else:
-        if "mode" in reply and reply["mode"] not in REPLY_MODES:
-            errors.append(f"{path}: reply.mode must be one of {REPLY_MODES}")
-        if "style" in reply and not isinstance(reply["style"], str):
-            errors.append(f"{path}: reply.style must be a string")
-        errors.extend(_str_list_errors(path, "reply.never", reply.get("never")))
+    errors.extend(validate_sources(path, data.get("sources")))
+    errors.extend(validate_reply(path, data.get("reply")))
 
     investigate = data.get("investigate") or {}
     if not isinstance(investigate, dict):
@@ -339,6 +354,106 @@ def resolve(glob, path, data):
     }
 
 
+def validate_workspace(path, data, known_repos):
+    errors = []
+    if not isinstance(data, dict):
+        return [f"{path}: top level must be a mapping"]
+    unknown = set(data) - WORKSPACE_KEYS
+    if unknown:
+        errors.append(f"{path}: unknown keys {sorted(unknown)}")
+    name = data.get("name")
+    if not isinstance(name, str) or not WORKSPACE_NAME.fullmatch(name):
+        errors.append(f"{path}: name must match {WORKSPACE_NAME.pattern}")
+    elif path.stem != name:
+        errors.append(f"{path}: file name must be {name}.yaml (derived from name {name!r})")
+    members = data.get("repos")
+    if not isinstance(members, list) or not members or not all(isinstance(r, str) for r in members):
+        errors.append(f"{path}: repos must be a non-empty list of owner/repo strings")
+    else:
+        for r in members:
+            if r.lower() not in known_repos:
+                errors.append(f"{path}: repo {r!r} has no file in repos/")
+        if len({r.lower() for r in members}) != len(members):
+            errors.append(f"{path}: repos lists a repository twice")
+    errors.extend(validate_sources(path, data.get("sources")))
+    errors.extend(validate_reply(path, data.get("reply")))
+    if "notes" in data and not isinstance(data["notes"], str):
+        errors.append(f"{path}: notes must be a string")
+    if "dir" in data and data["dir"] is not None and not isinstance(data["dir"], str):
+        errors.append(f"{path}: dir must be a string")
+    return errors
+
+
+def resolve_workspace(glob, path, data):
+    """A workspace owns sources shared by several repos. Gates stay per repo; only the
+    reply to the requester is decided here, because one request gets one reply."""
+    notes = []
+    reply = data.get("reply") or {}
+    declared_reply = reply.get("mode", "draft")
+    reply_mode = stricter(REPLY_MODES, glob["reply"]["mode"], declared_reply)
+    if reply_mode != declared_reply:
+        notes.append(f"reply capped at {reply_mode!r} by config.yaml")
+    return {
+        "name": data["name"],
+        "file": path.name,
+        "dir": expand(data.get("dir")),
+        "repos": [r.lower() for r in data["repos"]],
+        "sources": {
+            "slack": (data.get("sources") or {}).get("slack") or [],
+            "line": (data.get("sources") or {}).get("line") or [],
+        },
+        "reply": {
+            "mode": reply_mode,
+            "style": reply.get("style") or "",
+            "never": reply.get("never") or [],
+        },
+        "notes": data.get("notes") or "",
+        "downgrades": notes,
+    }
+
+
+def source_keys(sources):
+    for e in sources["slack"]:
+        yield ("slack", e["workspace"], e["channel"])
+    for e in sources["line"]:
+        yield ("line", e["chat"])
+
+
+def load_workspaces(glob, repos):
+    """Workspaces, plus the rule that makes them necessary: every source is read by
+    exactly one owner (a repo or a workspace), or one message becomes several Issues
+    and several replies."""
+    workspaces, errors = [], []
+    wdir = HOME / "workspaces"
+    known = {r["repo"] for r in repos}
+    for path in sorted(wdir.glob("*.yaml")) if wdir.exists() else []:
+        try:
+            data = load_yaml(path)
+        except ConfigError as exc:
+            errors.append(str(exc))
+            continue
+        errs = validate_workspace(path, data, known)
+        if errs:
+            errors.extend(errs)
+            continue
+        workspaces.append(resolve_workspace(glob, path, data))
+    member_of = {}
+    for w in workspaces:
+        for r in w["repos"]:
+            if r in member_of:
+                errors.append(f"repo {r} belongs to both {member_of[r]} and {w['file']}")
+            member_of[r] = w["file"]
+    owner = {}
+    for label, sources in [(r["file"], r["sources"]) for r in repos] + \
+                          [(w["file"], w["sources"]) for w in workspaces]:
+        for key in source_keys(sources):
+            if key in owner and owner[key] != label:
+                errors.append(f"source {':'.join(key)} is listed in both {owner[key]} and {label}; "
+                              "list it once, in a workspace if several repos share it")
+            owner.setdefault(key, label)
+    return workspaces, errors
+
+
 def load_all():
     glob = load_global()
     repos, errors = [], []
@@ -387,22 +502,44 @@ def main():
     group = rp.add_mutually_exclusive_group()
     group.add_argument("repo", nargs="?", help="exact owner/repo")
     group.add_argument("--dir", default=None, help="a checkout directory (default: current directory)")
+    wp = sub.add_parser(
+        "workspace",
+        help="Show one workspace's resolved config, by name or by --dir (default: cwd).",
+    )
+    wgroup = wp.add_mutually_exclusive_group()
+    wgroup.add_argument("name", nargs="?", help="workspace name")
+    wgroup.add_argument("--dir", default=None, help="the workspace directory (default: current directory)")
     args = ap.parse_args()
 
     try:
         glob, repos, errors = load_all()
+        workspaces, ws_errors = load_workspaces(glob, repos)
     except ConfigError as exc:
         print(json.dumps({"ok": False, "errors": str(exc).splitlines()}, ensure_ascii=False))
         return 2
+    errors += ws_errors
+    for r in repos:
+        r["workspace"] = next((w["name"] for w in workspaces if r["repo"] in w["repos"]), None)
 
     if args.cmd == "validate":
         print(json.dumps({"ok": not errors, "errors": errors,
-                          "repos": [r["repo"] for r in repos]}, ensure_ascii=False, indent=2))
+                          "repos": [r["repo"] for r in repos],
+                          "workspaces": [w["name"] for w in workspaces]}, ensure_ascii=False, indent=2))
         return 0 if not errors else 1
     if args.cmd == "show":
         print(json.dumps({"ok": not errors, "errors": errors, "global": glob,
-                          "repos": repos}, ensure_ascii=False, indent=2))
+                          "repos": repos, "workspaces": workspaces}, ensure_ascii=False, indent=2))
         return 0 if not errors else 1
+    if args.cmd == "workspace":
+        if args.name:
+            w = next((x for x in workspaces if x["name"] == args.name), None)
+        else:
+            w = find_by_dir(workspaces, args.dir or os.getcwd())
+        if not w:
+            print(json.dumps({"ok": False, "errors": ["workspace not found"]}))
+            return 1
+        print(json.dumps(w, ensure_ascii=False, indent=2))
+        return 0
     if args.cmd == "repo":
         if args.repo:
             r = next((x for x in repos if x["repo"] == args.repo.lower()), None)
