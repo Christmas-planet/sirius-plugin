@@ -85,19 +85,20 @@ One Issue per independent action. Keep the title outcome-focused and under about
 
 Mark inferences as inferences. Do not invent acceptance criteria that change the request.
 
-## Labels
+## Title prefix, no labels
 
-Create a missing label only when it is one of the Sirius labels below, and never modify an existing label.
+Sirius uses no labels. The only state in the title is the `[implement]` prefix, the go-ahead to build.
 
-- Always add `sirius`.
-- Add `needs-info` when the acceptance criteria are not verifiable yet.
-- Never add `implement`, `working`, `human-review`, or `human-merge`. `implement` is a person's decision (the guard hook refuses it). In `implement_gate: auto` projects, the implement skill picks up `sirius` Issues without `needs-info`, so no execution label is needed.
+- `implement_gate: auto`: start the title with `[implement] ` when the packet is an implementation candidate and the acceptance criteria are verifiable. Otherwise leave it off and list what is missing under "Open questions".
+- `implement_gate: human`: never add `[implement]`. A person adds it after reading the Issue. The guard hook refuses it from you.
+
+Always pass `-R owner/repo` to `gh issue create`, so the guard can check the project's gate.
 
 Assign only an explicit GitHub login from the packet.
 
 ## Create and verify
 
-Create with `gh issue create`, then re-fetch it and confirm the repository, number, state, title, labels, and URL. Never report `created` before this check passes.
+Create with `gh issue create`, then re-fetch it and confirm the repository, number, state, title, and URL. Never report `created` before this check passes.
 
 ## Return exactly one status
 

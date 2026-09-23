@@ -34,11 +34,47 @@ BASH_RULES = [
     (re.compile(r"\bgh\s+api\b(?=.*\b(rulesets|branches/\S+/protection)\b)"
                 r"(?=.*(-X|--method)[= ]*['\"]?(PUT|POST|PATCH|DELETE)\b)", re.IGNORECASE),
      "Changing branch protection or rulesets is the operator's job."),
-    (re.compile(r"\bgh\s+api\b.*\blabels\b.*\bimplement\b"),
-     "Only a person adds the implement label."),
+    (re.compile(r"\bgh\s+api\b.*\btitle=['\"]?\[(implement|merge)\]"),
+     "Set [implement] and [merge] title prefixes with gh issue/pr edit -R owner/repo, not the API."),
 ]
-LABEL_FLAG = re.compile(r"--add-label(?:=|\s+)(?:'([^']*)'|\"([^\"]*)\"|(\S+))")
-PERSON_ONLY_LABELS = {"implement"}
+TITLE_FLAG = re.compile(r"(?:--title|-t)(?:=|\s+)(?:'([^']*)'|\"([^\"]*)\"|(\S+))")
+REPO_FLAG = re.compile(r"(?:--repo|-R)(?:=|\s+)['\"]?([\w.-]+/[\w.-]+)")
+GATED = {"issue": ("[implement]", "implement_gate"), "pr": ("[merge]", "merge")}
+
+
+def project_for(repo):
+    """Effective project settings for repo, or None. Reads ~/.sirius through sirius-config."""
+    import importlib.machinery
+    import importlib.util
+    path = Path(__file__).resolve().parent.parent / "bin" / "sirius-config"
+    loader = importlib.machinery.SourceFileLoader("sirius_config", str(path))
+    module = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
+    loader.exec_module(module)
+    try:
+        _, projects, errors = module.load_all()
+    except module.ConfigError:
+        return None
+    if errors:
+        return None
+    return next((p for p in projects if repo.lower() in p["repos"]), None)
+
+
+def check_title_prefix(cmd):
+    """[implement] on an Issue and [merge] on a PR are a person's go-ahead unless the
+    repository's project is set to auto for that gate."""
+    m = re.search(r"\bgh\s+(issue|pr)\s+(create|edit)\b", cmd)
+    if not m:
+        return
+    prefix, gate = GATED[m.group(1)]
+    titles = [next(g for g in t.groups() if g is not None) for t in TITLE_FLAG.finditer(cmd)]
+    if not any(t.lstrip().startswith(prefix) for t in titles):
+        return
+    repo = REPO_FLAG.search(cmd)
+    if not repo:
+        block(f"Pass -R owner/repo when setting {prefix}, so the project's {gate} can be checked.")
+    project = project_for(repo.group(1))
+    if not project or project[gate] != "auto":
+        block(f"Only a person adds {prefix} in {repo.group(1)} ({gate} is not auto).")
 
 
 def protected(path_str):
@@ -69,11 +105,7 @@ def main():
         home = str(Path.home())
         cmd = args.get("command", "")
         cmd = re.sub(r"\$\{HOME\}|\$HOME|(?<![\w/])~(?=/)", home, cmd)
-        if re.search(r"\bgh\s+(issue|pr)\s+edit\b", cmd):
-            for m in LABEL_FLAG.finditer(cmd):
-                names = {n.strip() for n in next(g for g in m.groups() if g is not None).split(",")}
-                if names & PERSON_ONLY_LABELS:
-                    block("Only a person adds the implement label.")
+        check_title_prefix(cmd)
         for pattern, reason in BASH_RULES:
             if pattern.search(cmd):
                 block(reason)

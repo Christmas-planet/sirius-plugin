@@ -30,7 +30,6 @@ GLOBAL_DEFAULTS = {
     "reviewer": "codex",
     "implement_gate": "human",
     "merge": "manual",
-    "human_labels": ["human-merge"],
     "human_paths": [".github/workflows/"],
     "identities": {},
     "limits": {"new_issues_per_source": 5, "concurrent_workers": 2},

@@ -40,14 +40,10 @@ check "guard blocks gh pr merge" '! g "{\"tool_name\":\"Bash\",\"tool_input\":{\
 check "guard blocks merge API" '! g "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh api -X PUT repos/o/r/pulls/1/merge\"}}"'
 check "guard blocks --admin" '! g "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh pr review 1 --admin\"}}"'
 check "guard blocks force push" '! g "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git push -f origin x\"}}"'
-check "guard blocks self-applied implement" '! g "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh issue edit 1 --add-label implement\"}}"'
-check "guard allows working label" 'g "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh issue edit 1 --add-label working\"}}"'
 check "guard allows normal push" 'g "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git push origin sirius/issue-1-x\"}}"'
 check "guard blocks shell write to settings" '! g "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"echo x > $SIRIUS_HOME/config.yaml\"}}"'
 check "guard blocks ruleset PATCH" '! g "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh api -X PATCH repos/o/r/rulesets/1\"}}"'
 check "guard allows ruleset read" 'g "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh ruleset list -R o/r\"}}"'
-check "guard allows human-merge label" 'g "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh pr edit 1 --add-label human-merge\"}}"'
-check "guard blocks implement in a label list" '! g "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"gh issue edit 1 --add-label sirius,implement\"}}"'
 check "guard blocks \$HOME write to settings" '! print -r -- "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"echo x > \\\"\$HOME/.sirius/config.yaml\\\"\"}}" | SIRIUS_HOME=$HOME/.sirius scripts/guard 2>/dev/null'
 check "negative approvals rejected" '
   sed "s/name: my-project/name: neg/; s#acme/my-project#acme/neg#; s/approvals: 0/approvals: -1/" templates/project.yaml > "$SIRIUS_HOME/projects/neg.yaml"
@@ -64,6 +60,19 @@ rm -f "$SIRIUS_HOME/projects/upper.yaml"
 check "concurrent acquire yields one owner" '
   [[ $(for i in 1 2 3 4 5 6 7 8; do bin/sirius-lease acquire c$i & done 2>/dev/null; wait) == *acquired\"\:\ true* ]] &&
   [[ $(for i in 1 2 3 4 5 6 7 8; do bin/sirius-lease acquire d$i & done 2>/dev/null; wait) != *acquired\"\:\ true* ]]'
+# Title-prefix gates. The template project is human/manual; "fast" is auto/auto.
+sed "s/name: my-project/name: fast/; s#acme/my-project#acme/fast#g; s/^implement_gate: human/implement_gate: auto/; s/^merge: manual/merge: auto/" templates/project.yaml > "$SIRIUS_HOME/projects/fast.yaml"
+sed -i "" "/^needs_review/d; s/^reviewer: claude/reviewer: codex/; s/^implement_gate: human/implement_gate: auto/" "$SIRIUS_HOME/config.yaml"
+sed -i "" "s/^identities: {}/identities: {reviewer: {login: bot, gh_config_dir: \/tmp\/x}}/" "$SIRIUS_HOME/config.yaml"
+gt() { g "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"$1\"}}"; }
+check "guard blocks [implement] on a human-gate repo" '! gt "gh issue edit 1 -R acme/my-project --title \\\"[implement] x\\\""'
+check "guard allows [implement] on an auto-gate repo" 'gt "gh issue create -R acme/fast --title \\\"[implement] x\\\" --body y"'
+check "guard requires -R for [implement]" '! gt "gh issue edit 1 --title \\\"[implement] x\\\""'
+check "guard blocks [merge] on a manual repo" '! gt "gh pr edit 2 -R acme/my-project -t \\\"[merge] x\\\""'
+check "guard allows [merge] on an auto repo" 'gt "gh pr edit 2 -R acme/fast --title \\\"[merge] x\\\""'
+check "guard allows plain titles" 'gt "gh issue edit 1 -R acme/my-project --title \\\"Fix login\\\""'
+check "guard blocks title prefix via API" '! gt "gh api -X PATCH repos/acme/fast/issues/1 -f title=[implement]x"'
+rm -f "$SIRIUS_HOME/projects/fast.yaml"
 check "guard asks on Write to settings" '
   print -r -- "{\"tool_name\":\"Write\",\"tool_input\":{\"file_path\":\"$SIRIUS_HOME/projects/x.yaml\"}}" | scripts/guard | grep -q "\"ask\""'
 

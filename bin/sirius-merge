@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""PRをマージする唯一の入口。レビュー用アカウントの判定と承認がそろったPRだけをsquashマージする。
+"""PRをマージする唯一の入口。
+
+merge: manual のPRは、人がタイトル先頭に [merge] を付けたときだけ、
+merge: auto のPRは、レビュー用アカウントの判定と承認がそろったときだけ squash マージする。
 
   sirius-merge check   <owner/repo> <pr>               条件を1つずつ表示する。書き込みはしない。
   sirius-merge merge   <owner/repo> <pr>               条件がすべてそろったときだけマージする。
@@ -211,6 +214,33 @@ def verdict_problems(verdict: dict[str, Any], authors: set[str]) -> list[str]:
     return problems
 
 
+MERGE_PREFIX = "[merge]"
+
+
+def merge_authorization(repo: str, number: int, pr: dict[str, Any]) -> tuple[bool, str]:
+    """manual mode: a person put [merge] at the start of the PR title after the last push.
+
+    The title must carry the prefix now, and the rename that added it must be newer than
+    the latest commit and any force-push, so commits pushed after the approval are not
+    merged unseen. Commit dates come from git and can be set by whoever commits; this
+    check keeps honest runs honest, it does not stop a hostile one.
+    """
+    if not pr["title"].startswith(MERGE_PREFIX):
+        return False, f"タイトルが {MERGE_PREFIX} で始まっていない。人がタイトル先頭に {MERGE_PREFIX} を付けるとマージする"
+    events = api_items(f"repos/{repo}/issues/{number}/timeline?per_page=100")
+    added = [e["created_at"] for e in events if e.get("event") == "renamed"
+             and str((e.get("rename") or {}).get("to", "")).startswith(MERGE_PREFIX)
+             and not str((e.get("rename") or {}).get("from", "")).startswith(MERGE_PREFIX)]
+    pushed = [e["created_at"] for e in events if e.get("event") == "head_ref_force_pushed"]
+    pushed += [c["commit"]["committer"]["date"] for c in api_items(f"repos/{repo}/pulls/{number}/commits?per_page=100")]
+    if not added:
+        return False, f"{MERGE_PREFIX} はPR作成時から付いている。作成後に人が付けた記録がない"
+    last_push = max(pushed) if pushed else ""
+    if max(added) <= last_push:
+        return False, f"{MERGE_PREFIX} を付けた後（{max(added)}）に新しいコミットがある（{last_push}）。見直して付け直す"
+    return True, f"{max(added)} に付けられた"
+
+
 def evaluate(repo: str, number: int) -> tuple[list[Check], dict[str, Any]]:
     checks: list[Check] = []
 
@@ -221,32 +251,13 @@ def evaluate(repo: str, number: int) -> tuple[list[Check], dict[str, Any]]:
     policy, project = load_policy(repo)
     add("対象リポジトリ", project is not None, f"projects/{project['name']}.yaml" if project else "どの projects/*.yaml にもない")
     project = project or {"merge": "manual", "merge_rules": {}, "downgrades": []}
-    mode_detail = "auto" if project["merge"] == "auto" else "manual: 人がマージする設定。" + " / ".join(project.get("downgrades", []))
-    add("自動マージの設定", project["merge"] == "auto", mode_detail)
+    mode = project["merge"]
     rules = (project.get("merge_rules") or {}).get(repo.lower()) or {}
-    human = rules.get("human_branches") or {}
-    reviewer = implementer = ""
-    try:
-        reviewer = reviewer_identity()["login"]
-        implementer = implementer_login()
-        add("レビュー用アカウント", reviewer.lower() != implementer.lower(),
-            f"reviewer={reviewer} implementer={implementer}")
-    except Refused as error:
-        add("レビュー用アカウント", False, str(error))
 
     pr = pull_request(repo, number)
     head, base = pr["head"]["sha"], pr["base"]["ref"]
     add("PRの状態", pr["state"] == "open" and not pr["draft"], f"state={pr['state']} draft={pr['draft']}")
-
-    reason = human.get(base) or human.get("*")
-    add("人間が押すマージ", reason is None, reason or f"{base} は自動の対象")
-    labels = sorted({label["name"] for label in pr["labels"]} & set(policy.get("human_labels", [])))
-    add("人間用ラベル", not labels, ", ".join(labels) or "なし")
-    files = api_items(f"repos/{repo}/pulls/{number}/files?per_page=100")
-    guarded = tuple(policy.get("human_paths", []))
-    touched = sorted({name for f in files for name in (f["filename"], f.get("previous_filename") or "")
-                      if name and name.startswith(guarded)})
-    add("人間が見るファイル", not touched, ", ".join(touched) or "なし")
+    add("マージの方式", True, mode + ("（" + " / ".join(project["downgrades"]) + "）" if project.get("downgrades") else ""))
 
     tip = branch_tip(repo, base)
     behind = api(f"repos/{repo}/compare/{tip}...{head}")["behind_by"]
@@ -269,24 +280,51 @@ def evaluate(repo: str, number: int) -> tuple[list[Check], dict[str, Any]]:
         if review["state"] != "COMMENTED":
             latest[review["user"]["login"]] = review
     fresh = sorted(user for user, review in latest.items() if review["state"] == "APPROVED" and review["commit_id"] == head)
-    add("レビュー用アカウントの承認", reviewer in fresh, f"今のheadへの承認: {', '.join(fresh) or 'なし'}")
-    needed = int(rules.get("approvals", 0))
-    if needed:
-        humans = [u for u in fresh if u not in {reviewer, implementer}]
-        add("今のheadへの人の承認", len(humans) >= needed, f"{len(humans)}/{needed} {', '.join(humans)}")
+    changes = sorted(user for user, review in latest.items() if review["state"] == "CHANGES_REQUESTED")
+    add("変更要求なし", not changes, ", ".join(changes) or "なし")
 
+    files = api_items(f"repos/{repo}/pulls/{number}/files?per_page=100")
     fingerprint = patch_id(repo, number, files)
-    authors = author_models(api_items(f"repos/{repo}/pulls/{number}/commits?per_page=100"))
-    verdict = latest_verdict(repo, number, head, tip, reviewer) if reviewer else None
-    if verdict is None:
-        add("独立検証の判定", False, f"{reviewer or 'レビュー用アカウント'} による head {head[:7]}（{base} {tip[:7]} の上）への判定がない")
+    authors: set[str] = set()
+
+    if mode == "manual":
+        ok, detail = merge_authorization(repo, number, pr)
+        add("人のマージ許可", ok, detail)
+        needed = int(rules.get("approvals", 0))
+        if needed:
+            add("今のheadへの承認", len(fresh) >= needed, f"{len(fresh)}/{needed} {', '.join(fresh)}")
     else:
-        problems = verdict_problems(verdict, authors)
-        add("独立検証の判定", not problems, "; ".join(problems) or f"{verdict['verdict']}（{', '.join(verdict['verifier_models'])}）{verdict['url']}")
+        human = rules.get("human_branches") or {}
+        reason = human.get(base) or human.get("*")
+        add("人が判断するブランチ", reason is None, reason or f"{base} は自動の対象")
+        guarded = tuple(policy.get("human_paths", []))
+        touched = sorted({name for f in files for name in (f["filename"], f.get("previous_filename") or "")
+                          if name and name.startswith(guarded)})
+        add("人が見るファイル", not touched, ", ".join(touched) or "なし")
+        reviewer = implementer = ""
+        try:
+            reviewer = reviewer_identity()["login"]
+            implementer = implementer_login()
+            add("レビュー用アカウント", reviewer.lower() != implementer.lower(),
+                f"reviewer={reviewer} implementer={implementer}")
+        except Refused as error:
+            add("レビュー用アカウント", False, str(error))
+        add("レビュー用アカウントの承認", reviewer in fresh, f"今のheadへの承認: {', '.join(fresh) or 'なし'}")
+        needed = int(rules.get("approvals", 0))
+        if needed:
+            humans = [u for u in fresh if u not in {reviewer, implementer}]
+            add("今のheadへの人の承認", len(humans) >= needed, f"{len(humans)}/{needed} {', '.join(humans)}")
+        authors = author_models(api_items(f"repos/{repo}/pulls/{number}/commits?per_page=100"))
+        verdict = latest_verdict(repo, number, head, tip, reviewer) if reviewer else None
+        if verdict is None:
+            add("独立検証の判定", False, f"{reviewer or 'レビュー用アカウント'} による head {head[:7]}（{base} {tip[:7]} の上）への判定がない")
+        else:
+            problems = verdict_problems(verdict, authors)
+            add("独立検証の判定", not problems, "; ".join(problems) or f"{verdict['verdict']}（{', '.join(verdict['verifier_models'])}）{verdict['url']}")
 
     return checks, {
         "pr": pr, "head": head, "base": base, "tip": tip, "rules": rules,
-        "human_labels": set(policy.get("human_labels", [])), "fingerprint": fingerprint, "authors": authors,
+        "fingerprint": fingerprint, "authors": authors,
     }
 
 

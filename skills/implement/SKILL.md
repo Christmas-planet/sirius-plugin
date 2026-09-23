@@ -6,7 +6,11 @@ user-invocable: false
 
 # Implement Issues
 
-Run the implementation queue. GitHub labels and one marker comment per Issue are the durable state, so every transition can be observed and resumed.
+Run the implementation queue. Sirius uses no labels. Three things on GitHub are the durable state, so every transition can be observed and resumed:
+
+- the `[implement]` prefix on an Issue title: the go-ahead to build it;
+- one marker comment `<!-- sirius-implement -->` on the Issue, whose `phase` is `working`, `waiting`, `blocked`, or `ready`;
+- the linked PR: draft while in progress, ready when handed off.
 
 ## Inputs
 
@@ -14,14 +18,11 @@ From `run`: the frozen project table (from `sirius-config show`), the run ID, th
 
 ## Eligibility
 
-An open Issue (not a PR) in a listed repository, without `working`, `human-review`, `waiting`, or `needs-info`, and:
+An open Issue (not a PR) in a listed repository whose title starts with `[implement]`, and whose marker comment is absent or has phase `working` (resume) but not `waiting`, `blocked`, or `ready`.
 
-| Project `implement_gate` | Also required |
-|---|---|
-| `human` | the `implement` label, added by a person |
-| `auto` | the `implement` label, or the `sirius` label |
+Who adds `[implement]` depends on the project's `implement_gate`: a person for `human`, and `create-issue` for `auto`. In `human` projects, never add it yourself; the guard hook refuses it. An Issue a person wrote and prefixed is eligible in either mode.
 
-Never add `implement` yourself; the guard hook refuses it. Skip an Issue that already has an open PR that closes it.
+Skip an Issue that already has a ready PR closing it.
 
 Page through every Issue in every listed repository until `hasNextPage` is false. `gh search` is a fast first pass, not proof of completeness.
 
@@ -33,18 +34,17 @@ Collect `blockedBy`, parent and sub-Issues, and explicit "depends on" or "blocke
 
 Just before each claim, re-fetch the Issue. If it is still eligible:
 
-1. create the `working` label if it is missing (never modify existing labels) and add it;
-2. re-fetch and confirm `working` is on it and no competing PR appeared;
-3. create or update one marker comment `<!-- sirius-implement -->` with the run ID, branch, phase, and timestamps;
-4. use the branch `sirius/issue-<number>-<slug>`, and reuse an existing matching branch or draft PR when it can be recovered safely.
+1. create or update the marker comment `<!-- sirius-implement -->` with phase `working`, the run ID, the branch, and timestamps;
+2. re-fetch the comments and confirm yours is the only marker with phase `working` for a live run, and that no competing PR appeared;
+3. use the branch `sirius/issue-<number>-<slug>`, and reuse an existing matching branch or draft PR when it can be recovered safely.
 
-At the start of the phase, look at Issues that already carry the marker. Resume their branch or PR. If a claim is stale (no live worker, no progress in the lease window, nothing recoverable), remove `working` and note the recovery once. Never take over a claim with recent progress.
+At the start of the phase, look at Issues that already carry the marker. Resume their branch or PR. If a claim is stale (no live worker, no progress in the lease window, nothing recoverable), set the marker back to no phase and note the recovery once. Never take over a claim with recent progress.
 
 ## Work in parallel
 
 Read [worker-contract.md](references/worker-contract.md) before launching workers. Give each worker one Issue and its own worktree, created under `~/.sirius/worktrees/<repo>/<branch>` from the current remote default branch. Never reuse the user's checkout or copy its uncommitted changes.
 
-Launch all workers in the ready layer in one batch. Use the configured `implementer` (`claude`: subagents; `codex`: `codex exec` in the worktree). Workers implement, verify, push, and open a draft PR. They do not review, mark ready, change final labels, or merge.
+Launch all workers in the ready layer in one batch. Use the configured `implementer` (`claude`: subagents; `codex`: `codex exec` in the worktree). Workers implement, verify, push, and open a draft PR. They do not review, mark ready, change titles, or merge.
 
 ## Review and repair
 
@@ -65,21 +65,21 @@ When the review is clean and required checks pass:
 
 1. re-fetch the PR and the Issue;
 2. `gh pr ready`;
-3. create the `human-review` label if missing, add it to the Issue and the PR, and remove `working` from the Issue;
-4. update the marker comment with the PR URL, reviewed head SHA, reviewer, and review time;
-5. re-fetch both and confirm the labels.
+3. set the marker phase to `ready`, with the PR URL, reviewed head SHA, reviewer, and review time;
+4. re-fetch both and confirm the PR is ready and the marker says `ready`.
 
-`human-review` means ready for the merge phase, not merged. The merge skill decides what happens next from the project's `merge` setting.
+Do not put `[merge]` on the PR here. A ready PR goes to the merge skill, which decides from the project's `merge` setting.
 
 ## Failures
 
-- Before a branch or PR exists: remove `working` for a retryable setup failure and note it once.
-- After a branch or PR exists: keep `working` and resume next run.
+- Before a branch or PR exists: clear the marker phase for a retryable setup failure and note it once.
+- After a branch or PR exists: keep phase `working` and resume next run.
+- Waiting on someone outside: phase `waiting` with what is awaited. A person clears it by deleting the phase line or the marker.
+- Needs a decision only the user can make: phase `blocked` with the question.
 - Decisions about dependencies, secrets, production writes, destructive operations, or anything only the user can decide: do not guess. Keep the PR draft and put the question in the report.
-- If the Issue is closed or loses eligibility mid-run, stop its worker and report the leftover branch; do not delete it.
-- If `human-review` or `human-merge` appears while a worker runs, stop changing it.
+- If the Issue is closed or `[implement]` is removed mid-run, stop its worker and report the leftover branch; do not delete it.
 - In a fresh pnpm worktree, install dependencies with the repository's lockfile instead of linking another checkout's `node_modules`.
 
 ## Report
 
-One row per Issue: repository and number, gate, dependency state, branch, PR, review result, checks, and final labels. Group them as `ready`, `in_progress`, `blocked`, `skipped`, and `failed`.
+One row per Issue: repository and number, gate, dependency state, branch, PR, review result, checks, and marker phase. Group them as `ready`, `in_progress`, `blocked`, `skipped`, and `failed`.

@@ -32,7 +32,7 @@ Write the plan to the ledger before the first external write. Re-fetch each obje
 
 ## 4. Phases
 
-1. **Merge.** Run the `merge` skill for PRs with `human-review`. Afterwards, refresh the affected base branches.
+1. **Merge.** Run the `merge` skill for ready PRs and PRs titled `[merge]`. Afterwards, refresh the affected base branches.
 2. **Pending confirmations.** For each source checkpoint in `awaiting_confirmation`, put the saved question in the report and skip that source's intake. If the user answered in this conversation, resume it as the intake contract describes.
 3. **Intake.** Run `intake-slack` and `intake-line` for the unpaused sources in scope, in parallel. Pass each one only its project's sources and repositories, the frozen cutoff, and the new-Issue limit. Every Issue goes through `create-issue`.
 4. **Implement.** Run the `implement` skill with the frozen table, the run ID, `limits.concurrent_workers`, and the remaining time.
@@ -42,7 +42,7 @@ Stop starting new work when the remaining time cannot reach a safe checkpoint. E
 
 ## 5. Report
 
-Per project: sources read and their cutoffs, Issues created or found as duplicates, confirmations waiting on the user, Issues claimed, resumed, or blocked, PRs in draft, ready, or merged, PRs waiting for a manual merge, review passes, checks, retries, and any setting downgrades. Include the settings hash, the cutoff, the duration, and whether the lease was released. Never call the run complete while pagination, a checkpoint, or reconciliation is partial.
+Per project: sources read and their cutoffs, Issues created or found as duplicates, confirmations waiting on the user, Issues claimed, resumed, or blocked, PRs in draft, ready, or merged, Issues waiting for a person to add `[implement]`, PRs waiting for a person to add `[merge]`, review passes, checks, retries, and any setting downgrades. Include the settings hash, the cutoff, the duration, and whether the lease was released. Never call the run complete while pagination, a checkpoint, or reconciliation is partial.
 
 End with exactly one line:
 

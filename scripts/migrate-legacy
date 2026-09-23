@@ -117,7 +117,6 @@ def main():
             "reviewer": "claude",
             "implement_gate": "auto",
             "merge": "auto",
-            "human_labels": policy.get("human_labels", ["human-merge"]),
             "human_paths": policy.get("human_paths", [".github/workflows/"]),
             "identities": {},
         })

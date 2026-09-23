@@ -26,7 +26,7 @@ End every commit message with a Co-Authored-By trailer naming the implementing m
 
 Update the existing <!-- sirius-implement --> Issue progress comment with the branch, draft PR URL, phase, and timestamp. Do not create duplicate marker comments.
 
-Do not run the independent review. Do not mark the PR ready. Do not merge, close the Issue, remove working, add human-review, or process another Issue.
+Do not run the independent review. Do not mark the PR ready. Do not merge, close the Issue, change any title, or process another Issue.
 
 Return: issue URL, branch, commit SHA, draft PR URL, files changed, commands run with outcomes, acceptance evidence, and any blocker.
 ```
@@ -41,4 +41,4 @@ Return: issue URL, branch, commit SHA, draft PR URL, files changed, commands run
 
 ## Completion boundary
 
-The worker is complete only when it returns a pushed branch and a verified draft pull request, or a concrete blocker with preserved state. Review, CI follow-up, readiness, and final label transitions remain the orchestrator's responsibility.
+The worker is complete only when it returns a pushed branch and a verified draft pull request, or a concrete blocker with preserved state. Review, CI follow-up, readiness, and the marker phase remain the orchestrator's responsibility.

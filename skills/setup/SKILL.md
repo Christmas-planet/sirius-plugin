@@ -25,19 +25,17 @@ Write it from [the template](../../templates/config.yaml).
 3. Ask for the project name (default: the repository name, in kebab-case), any other repositories in the same project, the sources, and the gates:
    - Slack: exact workspace ID (`T…`) and channel IDs (`C…`). When a Slack connector is available, list the user's channels so they can pick. Names and wildcards do not count.
    - LINE: exact chat titles as shown in the app (this Mac only).
-   - `implement_gate`: `human` means a person adds the `implement` label to an Issue before Sirius builds it. `auto` means Sirius builds any `sirius` Issue that has clear acceptance criteria.
-   - `merge`: `manual` means Sirius makes the PR ready and a person merges. `auto` means Sirius merges when the reviewer account's verdict, the approval, CI, and the base-branch conditions all pass.
+   - `implement_gate`: `human` means a person puts `[implement]` at the start of an Issue title before Sirius builds it. `auto` means Sirius prefixes the Issues it creates itself when the acceptance criteria are clear.
+   - `merge`: `manual` means a person puts `[merge]` at the start of a ready PR's title and Sirius then merges it. `auto` means Sirius merges when the reviewer account's verdict, the approval, CI, and the base-branch conditions all pass.
    - Rules for each repository in `merge_rules`: `ci_required`, `approvals` (human approvals needed in addition to the reviewer account), `human_branches` (branch → reason, `*` for all), `deploys` (branch → what a merge deploys), and `deploy_workflows` (branch → the Actions workflow that performs it).
 4. Write `~/.sirius/projects/<name>.yaml` from [the template](../../templates/project.yaml), with `dir` set to the current directory.
 5. Run `sirius-config validate` and show the effective result, including any `downgrades`.
 
 For a project migrated from the old Sirius, the file has `needs_review: true`. That keeps the project on `human` and `manual` until the user has checked the file and removed the flag. Walk through the file with the user; do not remove the flag on your own judgment.
 
-## 3. Labels
+Sirius creates no labels. State lives in the title prefixes `[implement]` and `[merge]`, the Issue marker comment, and the PR's draft or ready status.
 
-For each repository, list the labels, then create only the missing Sirius labels: `sirius`, `implement`, `working`, `human-review`, `needs-info`, `waiting`, and `human-merge`. Never change existing labels. Show what will be created and create it after the user agrees.
-
-## 4. Operator checklist
+## 3. Operator checklist
 
 Print the steps that apply as a checklist, with exact commands. The agent must not do these itself: the guard hook refuses ruleset changes, and auto mode refuses writes to settings files.
 
@@ -60,7 +58,7 @@ Print the steps that apply as a checklist, with exact commands. The agent must n
    ```
 4. On each repository's default branch, add a ruleset that requires one approving review, dismisses stale approvals on push, and requires approval of the most recent push. Without it, the gate is enforced only by Sirius's own tools. Give the exact `gh api` command or the settings page URL.
 
-Until steps 1–3 are done, `sirius-config` reports those projects as `manual`.
+Until steps 1-3 are done, `sirius-config` reports those projects as `manual`.
 
 **Scheduler `launchd`**
 
@@ -75,6 +73,6 @@ The tick runs `claude -p "/sirius:run"` from `~/.sirius`, so the plugin must be 
 
 The job uses `StartInterval` without `KeepAlive`, so a crash does not cause a restart loop. To stop it: `launchctl bootout gui/$(id -u)/ai.sirius.tick`.
 
-## 5. Finish
+## 4. Finish
 
-Show `sirius-config show` for the project, the created labels, and the remaining checklist. Suggest `/sirius:status` next.
+Show `sirius-config show` for the project and the remaining checklist. Suggest `/sirius:status` next.

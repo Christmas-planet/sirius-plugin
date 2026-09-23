@@ -13,8 +13,7 @@ merge: manual           # manual | auto
 # none | loop | launchd. Use one scheduler per queue; the lease is per machine.
 scheduler: none
 
-# A PR with one of these labels, or touching one of these paths, is never auto-merged.
-human_labels: [human-merge]
+# In merge: auto, a PR touching one of these paths waits for a person to add [merge].
 human_paths: [.github/workflows/]
 
 limits:

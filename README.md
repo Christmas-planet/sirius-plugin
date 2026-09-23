@@ -50,10 +50,12 @@ Slack / LINE ─▶ Issue ─▶ 実装（ドラフト PR）─▶ 独立レビ�
 
 | 設定 | 値 | 意味 |
 |---|---|---|
-| `implement_gate` | `human` | 人が Issue に `implement` ラベルを付けたら実装する |
-| | `auto` | 受入条件がはっきりした `sirius` Issue なら実装する |
-| `merge` | `manual` | PR を ready にして通知する。マージは人がする |
-| | `auto` | 下の条件がすべてそろったら `sirius-merge` がマージする |
+| `implement_gate` | `human` | 人が Issue のタイトル先頭に `[implement]` を付けたら実装する |
+| | `auto` | 受入条件がはっきりした Issue なら、Sirius が作るときに `[implement]` を付けて実装する |
+| `merge` | `manual` | PR を ready にして知らせる。人がタイトル先頭に `[merge]` を付けたら Sirius がマージする |
+| | `auto` | 下の条件がすべてそろったら、Sirius が `[merge]` を付けてマージする |
+
+ラベルは使いません。状態は、タイトル先頭の `[implement]` / `[merge]`、Issue の目印コメント（`working` / `waiting` / `blocked` / `ready`）、PR が draft か ready かで表します。`[merge]` を付けた後に新しいコミットが入った PR はマージしないので、見直してから付け直してください。
 
 全体の `config.yaml` の値が上限です。プロジェクト側で緩くすることはできません。条件が足りないときは、`sirius-config` が自動で `manual` に落とし、その理由を `downgrades` に表示します。
 
@@ -80,7 +82,7 @@ Slack / LINE ─▶ Issue ─▶ 実装（ドラフト PR）─▶ 独立レビ�
 
 1. **GitHub のルールセットと別アカウント**（本命）: レビュー用アカウントの承認なしにはマージできない。
 2. **`sirius-merge`**: マージの唯一の入口。条件をすべて確かめ直してからマージする。
-3. **guard hook**（補助）: `gh pr merge`、`--admin`、force-push、エージェントによる `implement` の付与を止める。設定ファイルの変更には人の承認を求める。hook はタイムアウトすると止まらないので、これだけには頼らない。
+3. **guard hook**（補助）: `gh pr merge`、`--admin`、force-push を止める。ゲートが `auto` でないリポジトリでは、エージェントによる `[implement]` / `[merge]` の付与も止める。設定ファイルの変更には人の承認を求める。hook はタイムアウトすると止まらないので、これだけには頼らない。
 
 プラグインは `permissions.deny` を同梱できないため、`/sirius:setup` が追加すべき設定を提示します。
 
