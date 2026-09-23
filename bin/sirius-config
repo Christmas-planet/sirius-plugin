@@ -1,0 +1,248 @@
+#!/usr/bin/env python3
+"""Load, validate, and resolve Sirius configuration from ~/.sirius.
+
+Global:   ~/.sirius/config.yaml
+Projects: ~/.sirius/projects/<name>.yaml
+
+Gate settings resolve to the stricter of the global ceiling and the project value.
+Nothing inside a project repository is read, so a PR cannot loosen its own gate.
+"""
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+HOME = Path(os.environ.get("SIRIUS_HOME", Path.home() / ".sirius"))
+
+# Ordered from strictest to loosest.
+IMPLEMENT_GATES = ["human", "auto"]
+MERGE_MODES = ["manual", "auto"]
+SCHEDULERS = ["none", "loop", "launchd", "monitor"]
+AGENTS = ["claude", "codex"]
+
+GLOBAL_DEFAULTS = {
+    "version": 1,
+    "scheduler": "none",
+    "implementer": "claude",
+    "reviewer": "codex",
+    "implement_gate": "human",
+    "merge": "manual",
+    "human_labels": ["human-merge"],
+    "human_paths": [".github/workflows/"],
+    "identities": {},
+    "limits": {"new_issues_per_source": 5, "concurrent_workers": 2},
+}
+
+PROJECT_KEYS = {
+    "name", "dir", "repos", "sources", "implement_gate", "merge",
+    "merge_rules", "notes", "needs_review",
+}
+SOURCE_KINDS = {"slack", "line"}
+
+
+class ConfigError(Exception):
+    pass
+
+
+def load_yaml(path):
+    text = path.read_text(encoding="utf-8")
+    try:
+        import yaml  # type: ignore
+        return yaml.safe_load(text) or {}
+    except ImportError:
+        pass
+    # macOS ships Ruby with Psych, so use it when PyYAML is absent.
+    try:
+        out = subprocess.run(
+            ["ruby", "-ryaml", "-rjson", "-e",
+             "puts JSON.generate(YAML.safe_load(STDIN.read) || {})"],
+            input=text, capture_output=True, text=True, check=True,
+        ).stdout
+        return json.loads(out)
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise ConfigError(
+            f"{path}: no YAML parser (install PyYAML: python3 -m pip install pyyaml)"
+        ) from exc
+
+
+def expand(p):
+    return str(Path(os.path.expanduser(p)).resolve()) if p else None
+
+
+def stricter(order, a, b):
+    return a if order.index(a) <= order.index(b) else b
+
+
+def load_global():
+    path = HOME / "config.yaml"
+    if not path.exists():
+        raise ConfigError(f"{path} not found; run /sirius:setup")
+    data = load_yaml(path)
+    if not isinstance(data, dict):
+        raise ConfigError(f"{path}: top level must be a mapping")
+    cfg = {**GLOBAL_DEFAULTS, **data}
+    errors = []
+    for key, allowed in (("implement_gate", IMPLEMENT_GATES), ("merge", MERGE_MODES),
+                         ("scheduler", SCHEDULERS), ("implementer", AGENTS), ("reviewer", AGENTS)):
+        if cfg[key] not in allowed:
+            errors.append(f"{path}: {key} must be one of {allowed}")
+    if errors:
+        raise ConfigError("\n".join(errors))
+    return cfg
+
+
+def validate_project(path, data):
+    errors = []
+    if not isinstance(data, dict):
+        return [f"{path}: top level must be a mapping"]
+    unknown = set(data) - PROJECT_KEYS
+    if unknown:
+        errors.append(f"{path}: unknown keys {sorted(unknown)}")
+    if data.get("name") != path.stem:
+        errors.append(f"{path}: name must equal the file name ({path.stem})")
+    repos = data.get("repos") or []
+    if not isinstance(repos, list):
+        errors.append(f"{path}: repos must be a list")
+        repos = []
+    for r in repos:
+        if not isinstance(r, str) or r.count("/") != 1 or "*" in r:
+            errors.append(f"{path}: repo {r!r} must be an exact owner/repo")
+    sources = data.get("sources") or {}
+    if not isinstance(sources, dict):
+        errors.append(f"{path}: sources must be a mapping")
+        sources = {}
+    for kind, entries in sources.items():
+        if kind not in SOURCE_KINDS:
+            errors.append(f"{path}: unknown source kind {kind!r}")
+            continue
+        for e in entries or []:
+            if kind == "slack" and not (isinstance(e, dict) and e.get("workspace") and e.get("channel")):
+                errors.append(f"{path}: slack entry needs exact workspace and channel IDs: {e!r}")
+            if kind == "line" and not (isinstance(e, dict) and e.get("chat")):
+                errors.append(f"{path}: line entry needs an exact chat title: {e!r}")
+            if isinstance(e, dict) and any("*" in str(v) for v in e.values()):
+                errors.append(f"{path}: wildcards do not grant scope: {e!r}")
+    if data.get("implement_gate", "human") not in IMPLEMENT_GATES:
+        errors.append(f"{path}: implement_gate must be one of {IMPLEMENT_GATES}")
+    if data.get("merge", "manual") not in MERGE_MODES:
+        errors.append(f"{path}: merge must be one of {MERGE_MODES}")
+    return errors
+
+
+def resolve(glob, data):
+    """Return the effective project config plus reasons for any downgrade."""
+    notes = []
+    gate = stricter(IMPLEMENT_GATES, glob["implement_gate"], data.get("implement_gate", "human"))
+    merge = stricter(MERGE_MODES, glob["merge"], data.get("merge", "manual"))
+    if merge != data.get("merge", "manual"):
+        notes.append(f"merge capped at {merge!r} by config.yaml")
+    if merge == "auto" and glob["implementer"] == glob["reviewer"]:
+        merge = "manual"
+        notes.append("merge auto needs a reviewer model different from the implementer; using 'manual'")
+    ids = glob.get("identities") or {}
+    reviewer = ids.get("reviewer") or {}
+    if merge == "auto" and not (reviewer.get("login") and reviewer.get("gh_config_dir")):
+        merge = "manual"
+        notes.append("merge auto needs identities.reviewer (login, gh_config_dir); using 'manual'")
+    if data.get("needs_review"):
+        gate = "human"
+        merge = "manual"
+        notes.append("needs_review is set; human gate until the operator clears it")
+    return {
+        "name": data["name"],
+        "dir": expand(data.get("dir")),
+        "repos": data.get("repos") or [],
+        "sources": data.get("sources") or {},
+        "implement_gate": gate,
+        "merge": merge,
+        "merge_rules": data.get("merge_rules") or {},
+        "notes": data.get("notes") or "",
+        "downgrades": notes,
+    }
+
+
+def load_all():
+    glob = load_global()
+    projects, errors = [], []
+    pdir = HOME / "projects"
+    for path in sorted(pdir.glob("*.yaml")) if pdir.exists() else []:
+        try:
+            data = load_yaml(path)
+        except ConfigError as exc:
+            errors.append(str(exc))
+            continue
+        errs = validate_project(path, data)
+        if errs:
+            errors.extend(errs)
+            continue
+        projects.append(resolve(glob, data))
+    seen = {}
+    for p in projects:
+        for r in p["repos"]:
+            if r in seen:
+                errors.append(f"repo {r} is claimed by both {seen[r]} and {p['name']}")
+            seen[r] = p["name"]
+    return glob, projects, errors
+
+
+def find_by_dir(projects, cwd):
+    # samefile, not string comparison: macOS paths are case-insensitive.
+    chain = [Path(cwd).resolve(), *Path(cwd).resolve().parents]
+    best, best_depth = None, -1
+    for p in projects:
+        if not p["dir"] or not Path(p["dir"]).exists():
+            continue
+        for depth, c in enumerate(reversed(chain)):
+            if c.samefile(p["dir"]) and depth > best_depth:
+                best, best_depth = p, depth
+    return best
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="sirius-config")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("validate")
+    sub.add_parser("show")
+    pp = sub.add_parser("project")
+    pp.add_argument("name", nargs="?")
+    pp.add_argument("--dir", default=None)
+    rp = sub.add_parser("repo")
+    rp.add_argument("repo")
+    args = ap.parse_args()
+
+    try:
+        glob, projects, errors = load_all()
+    except ConfigError as exc:
+        print(json.dumps({"ok": False, "errors": str(exc).splitlines()}, ensure_ascii=False))
+        return 2
+
+    if args.cmd == "validate":
+        print(json.dumps({"ok": not errors, "errors": errors,
+                          "projects": [p["name"] for p in projects]}, ensure_ascii=False, indent=2))
+        return 0 if not errors else 1
+    if args.cmd == "show":
+        print(json.dumps({"ok": not errors, "errors": errors, "global": glob,
+                          "projects": projects}, ensure_ascii=False, indent=2))
+        return 0 if not errors else 1
+    if args.cmd == "project":
+        p = (next((x for x in projects if x["name"] == args.name), None) if args.name
+             else find_by_dir(projects, args.dir or os.getcwd()))
+        if not p:
+            print(json.dumps({"ok": False, "errors": ["project not found"]}))
+            return 1
+        print(json.dumps(p, ensure_ascii=False, indent=2))
+        return 0
+    if args.cmd == "repo":
+        p = next((x for x in projects if args.repo in x["repos"]), None)
+        if not p:
+            print(json.dumps({"ok": False, "errors": [f"{args.repo} is not in any project"]}))
+            return 1
+        print(json.dumps(p, ensure_ascii=False, indent=2))
+        return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

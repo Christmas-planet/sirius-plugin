@@ -1,0 +1,13 @@
+{
+  "name": "sirius",
+  "owner": { "name": "Christmas-planet" },
+  "metadata": { "description": "Sirius delivery automation for Claude Code." },
+  "plugins": [
+    {
+      "name": "sirius",
+      "source": "./",
+      "description": "Slack/LINE → GitHub Issue → reviewed PR → gated merge, configured per project in ~/.sirius.",
+      "version": "0.1.0"
+    }
+  ]
+}

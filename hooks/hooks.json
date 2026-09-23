@@ -1,0 +1,17 @@
+{
+  "description": "Sirius guard: refuse direct merges, force-push, self-applied gate labels, and unapproved edits to ~/.sirius gate settings. Supplementary to GitHub rulesets.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Edit|Write|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/scripts/guard",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

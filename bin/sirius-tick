@@ -1,0 +1,44 @@
+#!/bin/zsh
+# One scheduled Sirius run, for launchd (StartInterval, no KeepAlive).
+# /sirius:setup copies this file to ~/.sirius/bin/sirius-tick so the launchd job
+# does not point into the versioned plugin cache.
+# Exits quietly when stopped or when another run holds the lease, and notifies
+# the user when a run fails or ends blocked on a human decision.
+set -u
+
+SIRIUS_HOME="${SIRIUS_HOME:-$HOME/.sirius}"
+CLAUDE_BIN="${CLAUDE_BIN:-$(command -v claude || print $HOME/.local/bin/claude)}"
+LOG_DIR="$SIRIUS_HOME/logs/tick"
+mkdir -p "$LOG_DIR"
+
+notify() {
+  osascript -e "display notification \"${1//\"/\\\"}\" with title \"Sirius\"" >/dev/null 2>&1
+}
+
+[[ -e "$SIRIUS_HOME/STOP" ]] && exit 0
+
+stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+out="$LOG_DIR/$stamp.json"
+(cd "$SIRIUS_HOME" && "$CLAUDE_BIN" -p "/sirius:run" \
+   --permission-mode auto --output-format json) >"$out" 2>&1
+code=$?
+
+if (( code != 0 )); then
+  notify "Sirius の実行が失敗しました（exit $code）: $out"
+  exit $code
+fi
+
+# The run skill ends its report with a line "SIRIUS_STATUS: <ok|blocked|failed|busy>".
+run_status="$(python3 -c 'import json,re,sys
+try:
+    r=json.load(open(sys.argv[1])).get("result","")
+except Exception:
+    r=""
+m=re.search(r"SIRIUS_STATUS:\s*(\w+)", r)
+print(m.group(1) if m else "unknown")' "$out")"
+
+case "$run_status" in
+  ok|busy) ;;
+  blocked) notify "Sirius があなたの判断を待っています: $out" ;;
+  *) notify "Sirius の結果を確認してください（$run_status）: $out" ;;
+esac

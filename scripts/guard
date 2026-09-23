@@ -1,0 +1,88 @@
+#!/usr/bin/env python3
+"""PreToolUse guard for Sirius. A supplementary layer only.
+
+A hook does not block when it times out, and it cannot see the GitHub API called
+from another process. The real merge gate is the repository ruleset plus the
+separate reviewer account checked by sirius-merge. This hook catches the common
+direct paths so a mistake fails loudly.
+
+Exit 2 blocks the tool call and shows stderr to Claude. Writes to the gate
+settings get permissionDecision "ask", so a person approves each one; with no
+person present (claude -p) the write is refused.
+"""
+
+import json
+import os
+import re
+import sys
+from pathlib import Path
+
+SIRIUS = Path(os.environ.get("SIRIUS_HOME", Path.home() / ".sirius")).expanduser()
+PROTECTED = [SIRIUS / "config.yaml", SIRIUS / "projects"]
+
+BASH_RULES = [
+    (re.compile(r"\bgh\s+pr\s+merge\b"),
+     "Merge only through sirius-merge (the /sirius:merge skill)."),
+    (re.compile(r"\bgh\s+api\b.*\bpulls/\d+/merge\b"),
+     "Merge only through sirius-merge (the /sirius:merge skill)."),
+    (re.compile(r"\bgh\s+api\b.*\bmergePullRequest\b"),
+     "Merge only through sirius-merge (the /sirius:merge skill)."),
+    (re.compile(r"--admin\b"),
+     "Admin bypass of branch protection is not allowed."),
+    (re.compile(r"\bgit\s+push\b.*(--force\b|-f\b|--force-with-lease\b|\s\+\S)"),
+     "Force-push is not allowed from Sirius."),
+    (re.compile(r"\bgh\s+(issue|pr)\s+edit\b.*--add-label[= ]+['\"]?[^'\"]*\bimplement\b"),
+     "Only a person adds the implement label."),
+    (re.compile(r"\bgh\s+(issue|pr)\s+edit\b.*--add-label[= ]+['\"]?[^'\"]*\bmerge\b"),
+     "Only a person decides to merge."),
+    (re.compile(r"\bgh\s+ruleset\b|\bgh\s+api\b.*\b(rulesets|branches/[^/\s]+/protection)\b.*-X\s*(PUT|POST|PATCH|DELETE)"),
+     "Changing branch protection or rulesets is the operator's job."),
+]
+
+
+def protected(path_str):
+    try:
+        path = Path(path_str).expanduser().resolve()
+    except (OSError, RuntimeError):
+        return False
+    for p in PROTECTED:
+        p = p.resolve()
+        if path == p or p in path.parents:
+            return True
+    return False
+
+
+def block(reason):
+    print(f"sirius guard: {reason}", file=sys.stderr)
+    sys.exit(2)
+
+
+def main():
+    try:
+        event = json.load(sys.stdin)
+    except ValueError:
+        return 0
+    tool = event.get("tool_name", "")
+    args = event.get("tool_input") or {}
+    if tool == "Bash":
+        cmd = args.get("command", "")
+        for pattern, reason in BASH_RULES:
+            if pattern.search(cmd):
+                block(reason)
+        for p in PROTECTED:
+            shown = str(p).replace(str(Path.home()), "~")
+            if (str(p) in cmd or shown in cmd) and re.search(r"(>|\btee\b|\bsed\s+-i|\bmv\b|\bcp\b|\brm\b|\btruncate\b)", cmd):
+                block("Write Sirius settings with the Write or Edit tool so the user approves "
+                      "the change; shell writes to them are refused.")
+    elif tool in {"Edit", "Write", "MultiEdit", "NotebookEdit"}:
+        if protected(args.get("file_path") or args.get("notebook_path") or ""):
+            print(json.dumps({"hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "ask",
+                "permissionDecisionReason": "Sirius のゲート設定の変更です。内容を確認して承認してください。",
+            }}, ensure_ascii=False))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

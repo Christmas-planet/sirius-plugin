@@ -1,0 +1,28 @@
+# ~/.sirius/config.yaml — Sirius global settings. Edited by the operator.
+version: 1
+
+# Who writes the code and who reviews it (claude | codex).
+# merge: auto requires them to differ.
+implementer: claude
+reviewer: codex
+
+# Ceilings. A project can be stricter, never looser.
+implement_gate: human   # human | auto
+merge: manual           # manual | auto
+
+# none | loop | launchd. Use one scheduler per queue; the lease is per machine.
+scheduler: none
+
+# A PR with one of these labels, or touching one of these paths, is never auto-merged.
+human_labels: [human-merge]
+human_paths: [.github/workflows/]
+
+limits:
+  new_issues_per_source: 5
+  concurrent_workers: 2
+
+# Required for merge: auto. A separate GitHub account that posts verdicts and approvals.
+identities: {}
+#  reviewer:
+#    login: my-review-bot
+#    gh_config_dir: ~/.sirius/identities/reviewer

@@ -1,0 +1,134 @@
+#!/usr/bin/env python3
+"""One-shot migration from legacy Sirius files to ~/.sirius/projects/<name>.yaml.
+
+Reads only the `## 定義` section of each ~/.sirius/projects/<name>.md and the
+matching repositories in ~/.sirius/merge-policy.json. Legacy files are left in
+place. Every generated project gets `needs_review: true`, which forces the human
+gate until the operator checks the file and removes the flag.
+
+Usage: migrate-legacy [--write]   (dry run by default)
+"""
+
+import json
+import os
+import re
+import sys
+from pathlib import Path
+
+HOME = Path(os.environ.get("SIRIUS_HOME", Path.home() / ".sirius"))
+REPO_RE = re.compile(r"`([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)`")
+SLACK_ID_RE = re.compile(r"`(C[A-Z0-9]{8,})`")
+WORKSPACE_RE = re.compile(r"`(T[A-Z0-9]{8,})`")
+
+
+def definition_section(text):
+    m = re.search(r"^## 定義\s*$(.*?)(?=^## |\Z)", text, re.M | re.S)
+    return m.group(1).strip() if m else ""
+
+
+def local_dir(repo):
+    owner, name = repo.split("/")
+    for cand in (Path.home() / "projects" / owner / name,
+                 Path.home() / "projects" / owner.lower() / name,
+                 Path.home() / "projects" / name):
+        if (cand / ".git").exists():
+            return "~/" + str(cand.relative_to(Path.home()))
+    return None
+
+
+def merge_rules(policy, repos):
+    rules = {}
+    for r in repos:
+        entry = (policy.get("repos") or {}).get(r)
+        if entry is None:
+            continue
+        rule = {}
+        if entry.get("ci_required"):
+            rule["ci_required"] = True
+        if entry.get("approvals"):
+            rule["approvals"] = entry["approvals"]
+        if entry.get("human"):
+            rule["human_branches"] = entry["human"]
+        if entry.get("deploys"):
+            rule["deploys"] = entry["deploys"]
+        rules[r] = rule
+    return rules
+
+
+def yaml_dump(obj):
+    try:
+        import yaml  # type: ignore
+        return yaml.safe_dump(obj, allow_unicode=True, sort_keys=False, width=100)
+    except ImportError:
+        return json.dumps(obj, ensure_ascii=False, indent=2) + "\n"
+
+
+def convert(md_path, policy):
+    definition = definition_section(md_path.read_text(encoding="utf-8"))
+    repos = [r for r in REPO_RE.findall(definition) if not r.startswith(".")]
+    workspaces = WORKSPACE_RE.findall(definition)
+    channels = SLACK_ID_RE.findall(definition)
+    slack = ([{"workspace": workspaces[0], "channel": c} for c in channels]
+             if len(set(workspaces)) == 1 else [])
+    dirs = {r: local_dir(r) for r in repos}
+    rules = merge_rules(policy, repos)
+    any_human = any(v.get("human_branches") for v in rules.values())
+    auto_ok = rules and all(r in rules for r in repos) and not any_human
+    project = {
+        "name": md_path.stem,
+        "dir": next((d for d in dirs.values() if d), None),
+        "repos": repos,
+        "sources": {"slack": slack, "line": []},
+        "implement_gate": "auto",
+        "merge": "auto" if auto_ok else "manual",
+        "merge_rules": rules,
+        "notes": ("移行元の定義（完全一致のIDだけ自動抽出済み。LINE会話名、"
+                  "ワークスペースIDのないSlack、ワイルドカード指定は手で確認して追記する）:\n"
+                  + definition),
+        "needs_review": True,
+    }
+    if not repos:
+        project["merge"] = "manual"
+    return project
+
+
+def main():
+    write = "--write" in sys.argv
+    policy_path = HOME / "merge-policy.json"
+    policy = json.loads(policy_path.read_text()) if policy_path.exists() else {}
+    out_dir = HOME / "projects"
+    for md in sorted(out_dir.glob("*.md")):
+        target = out_dir / f"{md.stem}.yaml"
+        if target.exists():
+            print(f"skip {target} (exists)")
+            continue
+        body = yaml_dump(convert(md, policy))
+        if write:
+            target.write_text(body, encoding="utf-8")
+            print(f"wrote {target}")
+        else:
+            print(f"--- {target}\n{body}")
+    cfg = HOME / "config.yaml"
+    if not cfg.exists():
+        body = yaml_dump({
+            "version": 1,
+            "scheduler": "none",
+            "implementer": "codex",
+            "reviewer": "claude",
+            "implement_gate": "auto",
+            "merge": "auto",
+            "human_labels": policy.get("human_labels", ["human-merge"]),
+            "human_paths": policy.get("human_paths", [".github/workflows/"]),
+            "identities": {},
+        })
+        if write:
+            cfg.write_text(body, encoding="utf-8")
+            print(f"wrote {cfg}")
+        else:
+            print(f"--- {cfg}\n{body}")
+    if not write:
+        print("dry run; pass --write to create files")
+
+
+if __name__ == "__main__":
+    main()

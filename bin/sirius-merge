@@ -1,0 +1,521 @@
+#!/usr/bin/env python3
+"""PRをマージする唯一の入口。レビュー用アカウントの判定と承認がそろったPRだけをsquashマージする。
+
+  sirius-merge check   <owner/repo> <pr>               条件を1つずつ表示する。書き込みはしない。
+  sirius-merge merge   <owner/repo> <pr>               条件がすべてそろったときだけマージする。
+  sirius-merge verdict <owner/repo> <pr> <lanes.json>  検証結果を判定コメントとしてPRへ投稿する。
+
+規則は ~/.sirius/config.yaml と ~/.sirius/projects/<name>.yaml（sirius-config で解決）、
+停止スイッチは ~/.sirius/STOP、記録は ~/.sirius/logs/merges.tsv。
+
+判定はモデル名ではなく GitHub アカウントで区別する。config.yaml の identities.reviewer が
+実装に使うアカウントと別であり、判定コメントと今の head への Approve がそのアカウントから
+出ていることを確かめる。ブランチのルールセットで承認1件を必須にしておけば、
+このスクリプトを通らない直接のマージも GitHub が止める。
+"""
+
+from __future__ import annotations
+
+import hashlib
+import importlib.machinery
+import importlib.util
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+from urllib.parse import quote
+
+SIRIUS = Path(os.environ.get("SIRIUS_HOME", Path.home() / ".sirius"))
+STOP_PATH = SIRIUS / "STOP"
+LOG_PATH = SIRIUS / "logs" / "merges.tsv"
+MARKER = "<!-- sirius-verdict "
+LANES = {
+    "gates": "ゲートの再実行",
+    "live": "実画面での確認",
+    "audit": "差分と証跡の監査",
+    "regression": "trunkとの比較",
+}
+PASSING = {"PASS", "PASS+NOTES"}
+GREEN = {"success", "neutral", "skipped"}
+TRAILER = re.compile(r"^Co-Authored-By:\s*(.+?)\s*<[^>]*>\s*$", re.IGNORECASE | re.MULTILINE)
+DEPLOY_WAIT_SECONDS = 45 * 60
+
+Check = tuple[str, bool, str]
+
+
+class Refused(Exception):
+    pass
+
+
+def gh(*args: str, stdin: str | None = None, as_reviewer: bool = False) -> str:
+    env = None
+    if as_reviewer:
+        env = {**os.environ, "GH_CONFIG_DIR": str(Path(reviewer_identity()["gh_config_dir"]).expanduser())}
+        env.pop("GH_TOKEN", None)
+        env.pop("GITHUB_TOKEN", None)
+    result = subprocess.run(["gh", *args], capture_output=True, text=True, input=stdin, env=env)
+    if result.returncode != 0:
+        lines = (result.stderr or result.stdout).strip().splitlines()
+        raise Refused(f"gh {' '.join(args[:2])}: {lines[-1] if lines else result.returncode}")
+    return result.stdout
+
+
+def api(path: str) -> Any:
+    return json.loads(gh("api", path))
+
+
+def api_items(path: str, jq: str = ".[]") -> list[Any]:
+    return [json.loads(line) for line in gh("api", "--paginate", path, "--jq", jq).splitlines() if line]
+
+
+def _config_module() -> Any:
+    path = Path(__file__).resolve().with_name("sirius-config")
+    loader = importlib.machinery.SourceFileLoader("sirius_config", str(path))
+    module = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
+    loader.exec_module(module)
+    return module
+
+
+def load_policy(repo: str) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """Return (global config, effective project) for repo. Config errors refuse the merge."""
+    config = _config_module()
+    try:
+        glob, projects, errors = config.load_all()
+    except config.ConfigError as error:
+        raise Refused(str(error))
+    if errors:
+        raise Refused("設定にエラーがある: " + " / ".join(errors))
+    return glob, next((p for p in projects if repo in p["repos"]), None)
+
+
+def reviewer_identity() -> dict[str, Any]:
+    glob, _ = load_policy("")
+    reviewer = (glob.get("identities") or {}).get("reviewer") or {}
+    if not (reviewer.get("login") and reviewer.get("gh_config_dir")):
+        raise Refused("config.yaml の identities.reviewer（login, gh_config_dir）がない")
+    return reviewer
+
+
+def implementer_login() -> str:
+    return api("user")["login"]
+
+
+def model_id(name: str) -> str:
+    return re.sub(r"[\s.]+", "-", name.strip().lower())
+
+
+def author_models(commits: list[dict[str, Any]]) -> set[str]:
+    names = (name for commit in commits for name in TRAILER.findall(commit["commit"]["message"]))
+    return {model_id(name) for name in names if re.search(r"claude|codex|gpt|gemini", name, re.IGNORECASE)}
+
+
+def overlapping(verifiers: set[str], authors: set[str]) -> list[str]:
+    return sorted({v for v in verifiers for a in authors if v == a or v.startswith(a + "-") or a.startswith(v + "-")})
+
+
+def pull_request(repo: str, number: int) -> dict[str, Any]:
+    for _ in range(6):
+        pr = api(f"repos/{repo}/pulls/{number}")
+        if pr["state"] != "open" or pr["mergeable"] is not None:
+            return pr
+        time.sleep(2)
+    return pr
+
+
+def branch_tip(repo: str, branch: str) -> str:
+    return api(f"repos/{repo}/branches/{quote(branch, safe='')}")["commit"]["sha"]
+
+
+def has_workflows(repo: str, ref: str) -> bool:
+    result = subprocess.run(["gh", "api", f"repos/{repo}/contents/.github/workflows?ref={ref}"], capture_output=True, text=True)
+    if result.returncode == 0:
+        return True
+    if "HTTP 404" in result.stderr:
+        return False
+    raise Refused(f"ワークフローの有無を確かめられない: {result.stderr.strip()[:200]}")
+
+
+def patch_id(repo: str, number: int, files: list[dict[str, Any]]) -> str:
+    diff = gh("pr", "diff", str(number), "-R", repo)
+    ids = subprocess.run(["git", "patch-id", "--stable"], input=diff, capture_output=True, text=True, check=True).stdout.split()
+    text_part = ids[0] if ids else "none"
+    opaque = sorted(f"{f['filename']} {f.get('sha')}" for f in files if "patch" not in f)
+    if not opaque:
+        return text_part
+    return f"{text_part}+{hashlib.sha256(chr(10).join(opaque).encode()).hexdigest()[:16]}"
+
+
+def parse_marker(body: str) -> dict[str, Any] | None:
+    start = body.index(MARKER) + len(MARKER)
+    end = body.find(" -->", start)
+    try:
+        payload = json.loads(body[start:end])
+    except json.JSONDecodeError:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def latest_verdict(repo: str, number: int, head: str, fingerprint: str, reviewer: str) -> dict[str, Any] | None:
+    found = None
+    for comment in api_items(f"repos/{repo}/issues/{number}/comments?per_page=100"):
+        if comment["user"]["login"] != reviewer or MARKER not in comment["body"]:
+            continue
+        payload = parse_marker(comment["body"])
+        if payload and (payload.get("head_sha") == head or payload.get("patch_id") == fingerprint):
+            found = {**payload, "url": comment["html_url"]}
+    return found
+
+
+def lane_problems(lanes: Any) -> list[str]:
+    if not isinstance(lanes, dict):
+        return ["レーンがない"]
+    problems = []
+    for lane, label in LANES.items():
+        entry = lanes.get(lane)
+        if not isinstance(entry, dict) or entry.get("result") not in PASSING | {"FAIL"}:
+            problems.append(f"{label}の結果がない")
+        elif not isinstance(entry.get("evidence"), list) or not entry["evidence"]:
+            problems.append(f"{label}の証跡がない")
+    return problems
+
+
+def verdict_problems(verdict: dict[str, Any], authors: set[str]) -> list[str]:
+    problems = lane_problems(verdict.get("lanes"))
+    if verdict.get("verdict") not in PASSING:
+        problems.append(f"判定が {verdict.get('verdict')}")
+    lanes = verdict.get("lanes") if isinstance(verdict.get("lanes"), dict) else {}
+    failing = [label for lane, label in LANES.items() if isinstance(lanes.get(lane), dict) and lanes[lane].get("result") == "FAIL"]
+    if failing:
+        problems.append(f"{'、'.join(failing)}がFAIL")
+    verifiers = {model_id(m) for m in verdict.get("verifier_models", [])}
+    if not verifiers:
+        problems.append("検証したモデルの記録がない")
+    known_authors = authors | {model_id(m) for m in verdict.get("author_models", [])}
+    if not known_authors:
+        problems.append("実装したモデルが分からない。Co-Authored-By か判定の author_models で示す")
+    same = overlapping(verifiers, known_authors)
+    if same:
+        problems.append(f"実装と同じモデルが検証している: {', '.join(same)}")
+    if verdict.get("human_only"):
+        problems.append(f"検証者が人間の判断が要る変更と判定: {verdict.get('human_only_reason', '')}")
+    return problems
+
+
+def evaluate(repo: str, number: int) -> tuple[list[Check], dict[str, Any]]:
+    checks: list[Check] = []
+
+    def add(name: str, ok: bool, detail: str) -> None:
+        checks.append((name, ok, detail))
+
+    add("停止スイッチ", not STOP_PATH.exists(), f"{STOP_PATH} がある" if STOP_PATH.exists() else "なし")
+    policy, project = load_policy(repo)
+    add("対象リポジトリ", project is not None, f"projects/{project['name']}.yaml" if project else "どの projects/*.yaml にもない")
+    project = project or {"merge": "manual", "merge_rules": {}, "downgrades": []}
+    mode_detail = "auto" if project["merge"] == "auto" else "manual: 人がマージする設定。" + " / ".join(project.get("downgrades", []))
+    add("自動マージの設定", project["merge"] == "auto", mode_detail)
+    rules = (project.get("merge_rules") or {}).get(repo) or {}
+    human = rules.get("human_branches") or {}
+    reviewer = implementer = ""
+    try:
+        reviewer = reviewer_identity()["login"]
+        implementer = implementer_login()
+        add("レビュー用アカウント", reviewer.lower() != implementer.lower(),
+            f"reviewer={reviewer} implementer={implementer}")
+    except Refused as error:
+        add("レビュー用アカウント", False, str(error))
+
+    pr = pull_request(repo, number)
+    head, base = pr["head"]["sha"], pr["base"]["ref"]
+    add("PRの状態", pr["state"] == "open" and not pr["draft"], f"state={pr['state']} draft={pr['draft']}")
+
+    reason = human.get(base) or human.get("*")
+    add("人間が押すマージ", reason is None, reason or f"{base} は自動の対象")
+    labels = sorted({label["name"] for label in pr["labels"]} & set(policy.get("human_labels", [])))
+    add("人間用ラベル", not labels, ", ".join(labels) or "なし")
+    files = api_items(f"repos/{repo}/pulls/{number}/files?per_page=100")
+    touched = sorted(f["filename"] for f in files if f["filename"].startswith(tuple(policy.get("human_paths", []))))
+    add("人間が見るファイル", not touched, ", ".join(touched) or "なし")
+
+    tip = branch_tip(repo, base)
+    behind = api(f"repos/{repo}/compare/{tip}...{head}")["behind_by"]
+    add("trunkの先端に載っている", behind == 0, f"{base} {tip[:7]} から behind_by={behind}")
+    add("衝突なし", pr["mergeable"] is True and pr["mergeable_state"] != "dirty", f"mergeable={pr['mergeable']} state={pr['mergeable_state']}")
+
+    runs = api_items(f"repos/{repo}/commits/{head}/check-runs?per_page=100", ".check_runs[]")
+    statuses = api(f"repos/{repo}/commits/{head}/status")["statuses"]
+    waiting = [r["name"] for r in runs if r["status"] != "completed"] + [s["context"] for s in statuses if s["state"] == "pending"]
+    failing = [r["name"] for r in runs if r["status"] == "completed" and r["conclusion"] not in GREEN]
+    failing += [s["context"] for s in statuses if s["state"] in {"failure", "error"}]
+    expected = rules["ci_required"] if "ci_required" in rules else has_workflows(repo, head)
+    if not runs and not statuses:
+        add("CI", not expected, "ワークフローがあるのに、このheadでCIがまだ走っていない" if expected else "CIなし。検証のゲートレーンが代わる")
+    else:
+        add("CI", not waiting and not failing, f"実行中 {waiting} 失敗 {failing}" if waiting or failing else f"{len(runs) + len(statuses)}件、失敗なし")
+
+    latest: dict[str, dict[str, Any]] = {}
+    for review in api_items(f"repos/{repo}/pulls/{number}/reviews?per_page=100"):
+        if review["state"] != "COMMENTED":
+            latest[review["user"]["login"]] = review
+    fresh = sorted(user for user, review in latest.items() if review["state"] == "APPROVED" and review["commit_id"] == head)
+    add("レビュー用アカウントの承認", reviewer in fresh, f"今のheadへの承認: {', '.join(fresh) or 'なし'}")
+    needed = int(rules.get("approvals", 0))
+    if needed:
+        humans = [u for u in fresh if u not in {reviewer, implementer}]
+        add("今のheadへの人の承認", len(humans) >= needed, f"{len(humans)}/{needed} {', '.join(humans)}")
+
+    fingerprint = patch_id(repo, number, files)
+    authors = author_models(api_items(f"repos/{repo}/pulls/{number}/commits?per_page=100"))
+    verdict = latest_verdict(repo, number, head, fingerprint, reviewer) if reviewer else None
+    if verdict is None:
+        add("独立検証の判定", False, f"{reviewer or 'レビュー用アカウント'} による head {head[:7]} か patch-id {fingerprint[:12]} への判定がない")
+    else:
+        problems = verdict_problems(verdict, authors)
+        rebased = "" if verdict.get("head_sha") == head else f"。判定はhead {str(verdict.get('head_sha'))[:7]} で出ており、patch-idが一致"
+        add("独立検証の判定", not problems, "; ".join(problems) or f"{verdict['verdict']}（{', '.join(verdict['verifier_models'])}）{rebased} {verdict['url']}")
+
+    return checks, {
+        "pr": pr, "head": head, "base": base, "tip": tip, "rules": rules,
+        "human_labels": set(policy.get("human_labels", [])), "fingerprint": fingerprint, "authors": authors,
+    }
+
+
+def watch_runs(repo: str, sha: str) -> list[dict[str, Any]]:
+    deadline = time.monotonic() + DEPLOY_WAIT_SECONDS
+    settled_at = None
+    while time.monotonic() < deadline:
+        runs = api_items(f"repos/{repo}/actions/runs?head_sha={sha}&per_page=100", ".workflow_runs[]")
+        if runs and all(run["status"] == "completed" for run in runs):
+            settled_at = settled_at or time.monotonic()
+            if time.monotonic() - settled_at >= 90:
+                return [run for run in runs if run["conclusion"] not in GREEN]
+        else:
+            settled_at = None
+        time.sleep(30)
+    raise Refused("マージ後のワークフローが45分たっても終わらない")
+
+
+def open_revert(node_id: str) -> str:
+    query = "mutation($id: ID!) { revertPullRequest(input: {pullRequestId: $id}) { revertPullRequest { url } } }"
+    result = json.loads(gh("api", "graphql", "-f", f"query={query}", "-f", f"id={node_id}"))
+    return result["data"]["revertPullRequest"]["revertPullRequest"]["url"]
+
+
+def notify(message: str) -> None:
+    script = f"display notification {json.dumps(message, ensure_ascii=False)} with title \"sirius-merge\""
+    subprocess.run(["osascript", "-e", script], check=False, capture_output=True)
+
+
+def log(repo: str, number: int, head: str, action: str, detail: str) -> None:
+    LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    fresh = not LOG_PATH.exists()
+    cells = [datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), repo, str(number), head[:12], action, detail]
+    with LOG_PATH.open("a") as handle:
+        if fresh:
+            handle.write("ts\trepo\tpr\thead\taction\tdetail\n")
+        handle.write("\t".join(re.sub(r"[\t\r\n]+", " ", cell) for cell in cells) + "\n")
+
+
+def show(checks: list[Check]) -> None:
+    for name, ok, detail in checks:
+        print(f"{'OK' if ok else 'NG'}  {name}: {detail}")
+
+
+def cmd_check(repo: str, number: int) -> int:
+    checks, _ = evaluate(repo, number)
+    show(checks)
+    return 0 if all(ok for _, ok, _ in checks) else 1
+
+
+def deploy_settled(repo: str, number: int) -> bool:
+    if not LOG_PATH.exists():
+        return False
+    rows = (line.split("\t") for line in LOG_PATH.read_text().splitlines()[1:])
+    return any(len(cells) > 4 and cells[1] == repo and cells[2] == str(number) and cells[4] in {"deploy-ok", "deploy-failed"} for cells in rows)
+
+
+def follow_deploy(repo: str, number: int, pr: dict[str, Any], deploy: str) -> int:
+    head, merge_sha = pr["head"]["sha"], pr["merge_commit_sha"]
+    print(f"マージ後のワークフローを待つ: {deploy}")
+    try:
+        broken = watch_runs(repo, merge_sha)
+    except Refused as error:
+        log(repo, number, head, "deploy-unknown", str(error))
+        notify(f"{repo}#{number} のマージ後の配備を確認できない: {error}")
+        print(f"配備を確認できない。もう一度 merge を実行すると監視から再開する: {error}", file=sys.stderr)
+        return 2
+    if not broken:
+        log(repo, number, head, "deploy-ok", deploy)
+        print("マージ後のワークフローに失敗なし")
+        return 0
+    names = ", ".join(f"{run['name']}={run['conclusion']}" for run in broken)
+    try:
+        revert_url = open_revert(pr["node_id"])
+    except Refused as error:
+        revert_url = f"作れなかった（{error}）"
+    log(repo, number, head, "deploy-failed", f"{names} revert {revert_url}")
+    notify(f"{repo}#{number} のマージ後に失敗: {names}。revert PR {revert_url}")
+    print(f"マージ後に失敗: {names}\nrevert PRを作った: {revert_url}", file=sys.stderr)
+    return 2
+
+
+def drift_since_check(repo: str, number: int, context: dict[str, Any]) -> list[str]:
+    pr = api(f"repos/{repo}/pulls/{number}")
+    labels = {label["name"] for label in pr["labels"]} & context["human_labels"]
+    drift = {
+        "停止スイッチが入った": STOP_PATH.exists(),
+        "headが動いた": pr["head"]["sha"] != context["head"],
+        "宛先ブランチが変わった": pr["base"]["ref"] != context["base"],
+        "trunkの先端が動いた": branch_tip(repo, context["base"]) != context["tip"],
+        "人間用ラベルが付いた": bool(labels),
+    }
+    return [reason for reason, happened in drift.items() if happened]
+
+
+def cmd_merge(repo: str, number: int) -> int:
+    current = api(f"repos/{repo}/pulls/{number}")
+    if current["merged"]:
+        print(f"マージ済み: {current['merge_commit_sha']}")
+        _, project = load_policy(repo)
+        rules = ((project or {}).get("merge_rules") or {}).get(repo) or {}
+        deploy = (rules.get("deploys") or {}).get(current["base"]["ref"])
+        return follow_deploy(repo, number, current, deploy) if deploy and not deploy_settled(repo, number) else 0
+    checks, context = evaluate(repo, number)
+    show(checks)
+    head, base = context["head"], context["base"]
+    failed = [f"{name}: {detail}" for name, ok, detail in checks if not ok]
+    if failed:
+        log(repo, number, head, "refused", " / ".join(failed))
+        return 1
+    drift = drift_since_check(repo, number, context)
+    if drift:
+        print(f"NG  検査後の変化: {', '.join(drift)}")
+        log(repo, number, head, "refused", f"検査後の変化: {', '.join(drift)}")
+        return 1
+
+    try:
+        gh("pr", "merge", str(number), "-R", repo, "--squash", "--match-head-commit", head)
+    except Refused:
+        if not api(f"repos/{repo}/pulls/{number}")["merged"]:
+            raise
+    merged = api(f"repos/{repo}/pulls/{number}")
+    if not merged["merged"]:
+        raise Refused("マージ後に取り直したPRがmergedになっていない")
+    merge_sha = merged["merge_commit_sha"]
+    tip = branch_tip(repo, base)
+    if api(f"repos/{repo}/compare/{merge_sha}...{tip}")["behind_by"] != 0:
+        raise Refused(f"マージコミット {merge_sha[:7]} が {base} に見当たらない")
+    log(repo, number, head, "merged", f"{merge_sha} patch-id {context['fingerprint']}")
+    print(f"マージした: {merged['html_url']} → {base} {merge_sha[:7]}")
+
+    deploy = (context["rules"].get("deploys") or {}).get(base)
+    return follow_deploy(repo, number, merged, deploy) if deploy else 0
+
+
+def cmd_verdict(repo: str, number: int, spec_path: Path) -> int:
+    spec = json.loads(spec_path.read_text())
+    pr = pull_request(repo, number)
+    head = pr["head"]["sha"]
+    if spec.get("head_sha") != head:
+        raise Refused(f"検証したhead {spec.get('head_sha')} と今のhead {head} が違う。検証し直す")
+    problems = lane_problems(spec.get("lanes"))
+    if problems:
+        raise Refused("; ".join(problems))
+    live = spec["lanes"]["live"]["evidence"]
+    if not any(Path(item).expanduser().is_file() for item in live):
+        raise Refused("実画面の証跡に実在するファイルがない")
+    files = api_items(f"repos/{repo}/pulls/{number}/files?per_page=100")
+    authors = author_models(api_items(f"repos/{repo}/pulls/{number}/commits?per_page=100"))
+    authors |= {model_id(m) for m in spec.get("author_models", [])}
+    verifiers = {model_id(m) for m in spec.get("verifier_models", [])}
+    if not authors:
+        raise Refused("実装したモデルが分からない。Co-Authored-By がなければ author_models で示す")
+    same = overlapping(verifiers, authors)
+    if not verifiers or same:
+        raise Refused(f"検証したモデルが空か、実装と同じ: {', '.join(same)}")
+
+    results = {spec["lanes"][lane]["result"] for lane in LANES}
+    verdict = "FAIL" if "FAIL" in results else "PASS+NOTES" if "PASS+NOTES" in results else "PASS"
+    payload = {
+        "verdict": verdict,
+        "head_sha": head,
+        "base_sha": branch_tip(repo, pr["base"]["ref"]),
+        "patch_id": patch_id(repo, number, files),
+        "lanes": {lane: spec["lanes"][lane] for lane in LANES},
+        "verifier_models": sorted(verifiers),
+        "author_models": sorted(authors),
+        "human_only": bool(spec.get("human_only")),
+        "human_only_reason": spec.get("human_only_reason", ""),
+        "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
+    reviewer = reviewer_identity()["login"]
+    if gh("api", "user", "--jq", ".login", as_reviewer=True).strip().lower() != reviewer.lower():
+        raise Refused(f"レビュー用の gh 設定が {reviewer} としてログインしていない")
+    if reviewer.lower() == implementer_login().lower():
+        raise Refused("レビュー用アカウントが実装用アカウントと同じ")
+    gh("pr", "comment", str(number), "-R", repo, "--body-file", "-", stdin=render(payload, spec), as_reviewer=True)
+    if verdict in PASSING and not payload["human_only"]:
+        gh("pr", "review", str(number), "-R", repo, "--approve", "--body",
+           f"sirius verdict {verdict} for head {head[:7]}", as_reviewer=True)
+    log(repo, number, head, "verdict", f"{verdict} by {', '.join(sorted(verifiers))} patch-id {payload['patch_id']}")
+    print(f"判定を投稿した: {verdict} head {head[:7]} patch-id {payload['patch_id']}")
+    return 0
+
+
+def render(payload: dict[str, Any], spec: dict[str, Any]) -> str:
+    def cell(text: str) -> str:
+        return text.replace("|", "\\|").replace("\n", " ")
+
+    rows = []
+    for lane, label in LANES.items():
+        entry = payload["lanes"][lane]
+        notes = "<br>".join(cell(n) for n in entry.get("notes", []))
+        evidence = "<br>".join(f"`{cell(e)}`" for e in entry["evidence"])
+        rows.append(f"| {label} | {entry['result']} | {notes} | {evidence} |")
+    human = f"\n\n人間の判断が要る変更: はい。{payload['human_only_reason']}" if payload["human_only"] else ""
+    marker = json.dumps(payload, ensure_ascii=False).replace("-->", "--\\u003e")
+    return "\n".join([
+        f"{MARKER}{marker} -->",
+        f"## 独立検証の判定: {payload['verdict']}（head `{payload['head_sha'][:7]}`）",
+        "",
+        f"実装していないモデルが検証しました。検証は {', '.join(payload['verifier_models'])}、実装は {', '.join(payload['author_models']) or '記録なし'} です。",
+        "",
+        "| レーン | 結果 | 所見 | 証跡 |",
+        "| --- | --- | --- | --- |",
+        *rows,
+        "",
+        spec.get("summary", "").strip() + human,
+        "",
+        f"`sirius-merge` はこの判定を head `{payload['head_sha'][:7]}` と patch-id `{payload['patch_id'][:12]}` に対してだけ使います。",
+    ])
+
+
+COMMANDS = {"check", "merge", "verdict"}
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) < 3 or argv[0] not in COMMANDS or not re.fullmatch(r"[\w.-]+/[\w.-]+", argv[1]) or not argv[2].isdigit():
+        print(__doc__, file=sys.stderr)
+        return 64
+    command, repo, number = argv[0], argv[1], int(argv[2])
+    try:
+        if command == "check":
+            return cmd_check(repo, number)
+        if command == "merge":
+            return cmd_merge(repo, number)
+        if len(argv) != 4:
+            print(__doc__, file=sys.stderr)
+            return 64
+        return cmd_verdict(repo, number, Path(argv[3]))
+    except Refused as error:
+        print(f"中止: {error}", file=sys.stderr)
+        log(repo, number, "", f"{command}-error", str(error))
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

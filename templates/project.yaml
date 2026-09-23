@@ -1,0 +1,20 @@
+# ~/.sirius/projects/<name>.yaml — one file per project. Edited by the operator.
+name: my-project                 # must equal the file name
+dir: ~/projects/acme/my-project  # local checkout; used to find the project from the current directory
+repos:
+  - acme/my-project              # exact owner/repo; a repo belongs to one project only
+sources:
+  slack:
+    - {workspace: T0123456789, channel: C0123456789}   # exact IDs, no names or wildcards
+  line:
+    - {chat: "Exact chat title"}                         # native macOS LINE app only
+implement_gate: human   # human: a person adds `implement`; auto: Sirius builds clear `sirius` Issues
+merge: manual           # manual: a person merges; auto: sirius-merge merges when every check passes
+merge_rules:
+  acme/my-project:
+    ci_required: true
+    approvals: 0                 # human approvals needed in addition to the reviewer account
+    human_branches: {}           # e.g. {main: "deploys to production"} or {"*": "reason"}
+    deploys: {}                  # e.g. {main: "Vercel production"}; failures open a revert PR
+notes: |
+  Anything the agents should know about this project.
