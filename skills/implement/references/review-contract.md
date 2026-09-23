@@ -6,7 +6,7 @@ Run every review from the isolated Issue checkout after fetching the base and ch
 
 ## Command shape
 
-- `codex`: `codex review --base <verified-base-branch> "<review-prompt>"`
+- `codex`: `codex exec --sandbox read-only "<review-prompt> Review the diff of origin/<verified-base-branch>...HEAD in this checkout."` from the checkout. Do not use `codex review --base` with a prompt: the CLI rejects that combination.
 - `claude`: launch a new Claude subagent in the checkout with the prompt below and the diff against the base. It must not reuse the implementer's context.
 
 Use a fresh reviewer for every pass. Do not resume the prior reviewer session. Do not enable unsafe sandbox or approval bypasses.

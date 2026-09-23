@@ -31,13 +31,14 @@ BASH_RULES = [
      "Admin bypass of branch protection is not allowed."),
     (re.compile(r"\bgit\s+push\b.*(--force\b|-f\b|--force-with-lease\b|\s\+\S)"),
      "Force-push is not allowed from Sirius."),
-    (re.compile(r"\bgh\s+(issue|pr)\s+edit\b.*--add-label[= ]+['\"]?[^'\"]*\bimplement\b"),
-     "Only a person adds the implement label."),
-    (re.compile(r"\bgh\s+(issue|pr)\s+edit\b.*--add-label[= ]+['\"]?[^'\"]*\bmerge\b"),
-     "Only a person decides to merge."),
-    (re.compile(r"\bgh\s+ruleset\b|\bgh\s+api\b.*\b(rulesets|branches/[^/\s]+/protection)\b.*-X\s*(PUT|POST|PATCH|DELETE)"),
+    (re.compile(r"\bgh\s+api\b(?=.*\b(rulesets|branches/\S+/protection)\b)"
+                r"(?=.*(-X|--method)[= ]*['\"]?(PUT|POST|PATCH|DELETE)\b)", re.IGNORECASE),
      "Changing branch protection or rulesets is the operator's job."),
+    (re.compile(r"\bgh\s+api\b.*\blabels\b.*\bimplement\b"),
+     "Only a person adds the implement label."),
 ]
+LABEL_FLAG = re.compile(r"--add-label(?:=|\s+)(?:'([^']*)'|\"([^\"]*)\"|(\S+))")
+PERSON_ONLY_LABELS = {"implement"}
 
 
 def protected(path_str):
@@ -65,13 +66,19 @@ def main():
     tool = event.get("tool_name", "")
     args = event.get("tool_input") or {}
     if tool == "Bash":
+        home = str(Path.home())
         cmd = args.get("command", "")
+        cmd = re.sub(r"\$\{HOME\}|\$HOME|(?<![\w/])~(?=/)", home, cmd)
+        if re.search(r"\bgh\s+(issue|pr)\s+edit\b", cmd):
+            for m in LABEL_FLAG.finditer(cmd):
+                names = {n.strip() for n in next(g for g in m.groups() if g is not None).split(",")}
+                if names & PERSON_ONLY_LABELS:
+                    block("Only a person adds the implement label.")
         for pattern, reason in BASH_RULES:
             if pattern.search(cmd):
                 block(reason)
         for p in PROTECTED:
-            shown = str(p).replace(str(Path.home()), "~")
-            if (str(p) in cmd or shown in cmd) and re.search(r"(>|\btee\b|\bsed\s+-i|\bmv\b|\bcp\b|\brm\b|\btruncate\b)", cmd):
+            if str(p) in cmd and re.search(r"(>|\btee\b|\bsed\s+-i|\bmv\b|\bcp\b|\brm\b|\btruncate\b)", cmd):
                 block("Write Sirius settings with the Write or Edit tool so the user approves "
                       "the change; shell writes to them are refused.")
     elif tool in {"Edit", "Write", "MultiEdit", "NotebookEdit"}:

@@ -26,8 +26,9 @@ For each PR:
    - `audit`: compare the diff and the evidence with the Issue's acceptance criteria;
    - `regression`: compare with the base branch.
 
-   Write the lanes JSON (`head_sha`, `lanes`, `verifier_models`, `author_models`, `summary`, and `human_only` / `human_only_reason` when the change touches contracts, money, payments, authentication, or store submission) and run `sirius-merge verdict <repo> <pr> <lanes.json>`. It posts the verdict as the reviewer account and approves only a passing verdict that is not human-only.
-3. `sirius-merge merge <repo> <pr>`. It rechecks every condition, squash-merges only when all pass, and follows the post-merge deploy when the project lists one, opening a revert PR if the deploy fails.
+   Write the lanes JSON (`head_sha` and `base_sha` that you verified, `lanes`, `verifier_models`, `author_models`, `summary`, and `human_only` / `human_only_reason` when the change touches contracts, money, payments, authentication, or store submission) and run `sirius-merge verdict <repo> <pr> <lanes.json>`. It posts the verdict as the reviewer account and approves only a passing verdict that is not human-only.
+   A verdict counts only for exactly that head on exactly that base tip. After a rebase, verify again.
+3. `sirius-merge merge <repo> <pr>`. It runs every check twice and merges only if both passes agree, then squash-merges with `--match-head-commit`. For a branch listed in `deploys`, it waits for the workflow named in `deploy_workflows` and opens a revert PR if it fails. With no workflow named, it reports the deploy as unverified and asks the user to check it by hand.
 4. After a verified merge, close the source Issue if GitHub did not close it, and comment the merge SHA on it.
 
 If `sirius-merge` refuses, report its output as it is. Never work around a refusal, add `--admin`, or change rulesets.

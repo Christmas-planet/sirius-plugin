@@ -27,7 +27,7 @@ Write it from [the template](../../templates/config.yaml).
    - LINE: exact chat titles as shown in the app (this Mac only).
    - `implement_gate`: `human` means a person adds the `implement` label to an Issue before Sirius builds it. `auto` means Sirius builds any `sirius` Issue that has clear acceptance criteria.
    - `merge`: `manual` means Sirius makes the PR ready and a person merges. `auto` means Sirius merges when the reviewer account's verdict, the approval, CI, and the base-branch conditions all pass.
-   - Rules for each repository in `merge_rules`: `ci_required`, `approvals` (human approvals needed in addition to the reviewer account), `human_branches` (branch → reason, `*` for all), and `deploys` (branch → what a merge deploys).
+   - Rules for each repository in `merge_rules`: `ci_required`, `approvals` (human approvals needed in addition to the reviewer account), `human_branches` (branch → reason, `*` for all), `deploys` (branch → what a merge deploys), and `deploy_workflows` (branch → the Actions workflow that performs it).
 4. Write `~/.sirius/projects/<name>.yaml` from [the template](../../templates/project.yaml), with `dir` set to the current directory.
 5. Run `sirius-config validate` and show the effective result, including any `downgrades`.
 

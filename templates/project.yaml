@@ -15,6 +15,8 @@ merge_rules:
     ci_required: true
     approvals: 0                 # human approvals needed in addition to the reviewer account
     human_branches: {}           # e.g. {main: "deploys to production"} or {"*": "reason"}
-    deploys: {}                  # e.g. {main: "Vercel production"}; failures open a revert PR
+    deploys: {}                  # e.g. {main: "Vercel production"}
+    deploy_workflows: {}         # e.g. {main: "Deploy"}; this Actions workflow is watched and a failure opens a revert PR.
+                                 # Without it the deploy is reported as unverified.
 notes: |
   Anything the agents should know about this project.

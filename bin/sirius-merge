@@ -90,7 +90,7 @@ def load_policy(repo: str) -> tuple[dict[str, Any], dict[str, Any] | None]:
         raise Refused(str(error))
     if errors:
         raise Refused("設定にエラーがある: " + " / ".join(errors))
-    return glob, next((p for p in projects if repo in p["repos"]), None)
+    return glob, next((p for p in projects if repo.lower() in p["repos"]), None)
 
 
 def reviewer_identity() -> dict[str, Any]:
@@ -160,13 +160,18 @@ def parse_marker(body: str) -> dict[str, Any] | None:
     return payload if isinstance(payload, dict) else None
 
 
-def latest_verdict(repo: str, number: int, head: str, fingerprint: str, reviewer: str) -> dict[str, Any] | None:
+def latest_verdict(repo: str, number: int, head: str, tip: str, reviewer: str) -> dict[str, Any] | None:
+    """The newest verdict by the reviewer account for exactly this head on exactly this base tip.
+
+    A verdict for an older head or base is never reused, even with an identical patch-id:
+    a rebase changes what the change runs against, so it has to be verified again.
+    """
     found = None
     for comment in api_items(f"repos/{repo}/issues/{number}/comments?per_page=100"):
         if comment["user"]["login"] != reviewer or MARKER not in comment["body"]:
             continue
         payload = parse_marker(comment["body"])
-        if payload and (payload.get("head_sha") == head or payload.get("patch_id") == fingerprint):
+        if payload and payload.get("head_sha") == head and payload.get("base_sha") == tip:
             found = {**payload, "url": comment["html_url"]}
     return found
 
@@ -218,7 +223,7 @@ def evaluate(repo: str, number: int) -> tuple[list[Check], dict[str, Any]]:
     project = project or {"merge": "manual", "merge_rules": {}, "downgrades": []}
     mode_detail = "auto" if project["merge"] == "auto" else "manual: 人がマージする設定。" + " / ".join(project.get("downgrades", []))
     add("自動マージの設定", project["merge"] == "auto", mode_detail)
-    rules = (project.get("merge_rules") or {}).get(repo) or {}
+    rules = (project.get("merge_rules") or {}).get(repo.lower()) or {}
     human = rules.get("human_branches") or {}
     reviewer = implementer = ""
     try:
@@ -238,7 +243,9 @@ def evaluate(repo: str, number: int) -> tuple[list[Check], dict[str, Any]]:
     labels = sorted({label["name"] for label in pr["labels"]} & set(policy.get("human_labels", [])))
     add("人間用ラベル", not labels, ", ".join(labels) or "なし")
     files = api_items(f"repos/{repo}/pulls/{number}/files?per_page=100")
-    touched = sorted(f["filename"] for f in files if f["filename"].startswith(tuple(policy.get("human_paths", []))))
+    guarded = tuple(policy.get("human_paths", []))
+    touched = sorted({name for f in files for name in (f["filename"], f.get("previous_filename") or "")
+                      if name and name.startswith(guarded)})
     add("人間が見るファイル", not touched, ", ".join(touched) or "なし")
 
     tip = branch_tip(repo, base)
@@ -270,13 +277,12 @@ def evaluate(repo: str, number: int) -> tuple[list[Check], dict[str, Any]]:
 
     fingerprint = patch_id(repo, number, files)
     authors = author_models(api_items(f"repos/{repo}/pulls/{number}/commits?per_page=100"))
-    verdict = latest_verdict(repo, number, head, fingerprint, reviewer) if reviewer else None
+    verdict = latest_verdict(repo, number, head, tip, reviewer) if reviewer else None
     if verdict is None:
-        add("独立検証の判定", False, f"{reviewer or 'レビュー用アカウント'} による head {head[:7]} か patch-id {fingerprint[:12]} への判定がない")
+        add("独立検証の判定", False, f"{reviewer or 'レビュー用アカウント'} による head {head[:7]}（{base} {tip[:7]} の上）への判定がない")
     else:
         problems = verdict_problems(verdict, authors)
-        rebased = "" if verdict.get("head_sha") == head else f"。判定はhead {str(verdict.get('head_sha'))[:7]} で出ており、patch-idが一致"
-        add("独立検証の判定", not problems, "; ".join(problems) or f"{verdict['verdict']}（{', '.join(verdict['verifier_models'])}）{rebased} {verdict['url']}")
+        add("独立検証の判定", not problems, "; ".join(problems) or f"{verdict['verdict']}（{', '.join(verdict['verifier_models'])}）{verdict['url']}")
 
     return checks, {
         "pr": pr, "head": head, "base": base, "tip": tip, "rules": rules,
@@ -284,11 +290,13 @@ def evaluate(repo: str, number: int) -> tuple[list[Check], dict[str, Any]]:
     }
 
 
-def watch_runs(repo: str, sha: str) -> list[dict[str, Any]]:
+def watch_runs(repo: str, sha: str, workflow: str) -> list[dict[str, Any]]:
+    """Wait for the named deploy workflow on the merge commit. Returns the failed runs."""
     deadline = time.monotonic() + DEPLOY_WAIT_SECONDS
     settled_at = None
     while time.monotonic() < deadline:
-        runs = api_items(f"repos/{repo}/actions/runs?head_sha={sha}&per_page=100", ".workflow_runs[]")
+        runs = [run for run in api_items(f"repos/{repo}/actions/runs?head_sha={sha}&per_page=100", ".workflow_runs[]")
+                if run["name"] == workflow]
         if runs and all(run["status"] == "completed" for run in runs):
             settled_at = settled_at or time.monotonic()
             if time.monotonic() - settled_at >= 90:
@@ -296,7 +304,7 @@ def watch_runs(repo: str, sha: str) -> list[dict[str, Any]]:
         else:
             settled_at = None
         time.sleep(30)
-    raise Refused("マージ後のワークフローが45分たっても終わらない")
+    raise Refused(f"配備ワークフロー {workflow} が45分たっても終わらない")
 
 
 def open_revert(node_id: str) -> str:
@@ -335,14 +343,20 @@ def deploy_settled(repo: str, number: int) -> bool:
     if not LOG_PATH.exists():
         return False
     rows = (line.split("\t") for line in LOG_PATH.read_text().splitlines()[1:])
-    return any(len(cells) > 4 and cells[1] == repo and cells[2] == str(number) and cells[4] in {"deploy-ok", "deploy-failed"} for cells in rows)
+    return any(len(cells) > 4 and cells[1] == repo and cells[2] == str(number) and cells[4] in {"deploy-ok", "deploy-failed", "deploy-unverified"} for cells in rows)
 
 
-def follow_deploy(repo: str, number: int, pr: dict[str, Any], deploy: str) -> int:
+def follow_deploy(repo: str, number: int, pr: dict[str, Any], deploy: str, workflow: str | None) -> int:
     head, merge_sha = pr["head"]["sha"], pr["merge_commit_sha"]
-    print(f"マージ後のワークフローを待つ: {deploy}")
+    if not workflow:
+        # Nothing on GitHub identifies the deploy, so success cannot be claimed.
+        log(repo, number, head, "deploy-unverified", deploy)
+        notify(f"{repo}#{number} をマージした。配備（{deploy}）は自動で確認できないので、手で確認してください")
+        print(f"配備（{deploy}）を確認するワークフローが設定されていない。手で確認する", file=sys.stderr)
+        return 2
+    print(f"配備ワークフロー {workflow} を待つ: {deploy}")
     try:
-        broken = watch_runs(repo, merge_sha)
+        broken = watch_runs(repo, merge_sha, workflow)
     except Refused as error:
         log(repo, number, head, "deploy-unknown", str(error))
         notify(f"{repo}#{number} のマージ後の配備を確認できない: {error}")
@@ -364,16 +378,16 @@ def follow_deploy(repo: str, number: int, pr: dict[str, Any], deploy: str) -> in
 
 
 def drift_since_check(repo: str, number: int, context: dict[str, Any]) -> list[str]:
-    pr = api(f"repos/{repo}/pulls/{number}")
-    labels = {label["name"] for label in pr["labels"]} & context["human_labels"]
-    drift = {
-        "停止スイッチが入った": STOP_PATH.exists(),
-        "headが動いた": pr["head"]["sha"] != context["head"],
-        "宛先ブランチが変わった": pr["base"]["ref"] != context["base"],
-        "trunkの先端が動いた": branch_tip(repo, context["base"]) != context["tip"],
-        "人間用ラベルが付いた": bool(labels),
-    }
-    return [reason for reason, happened in drift.items() if happened]
+    """Run every check again and compare. Catches withdrawn approvals, rerun CI, and setting changes."""
+    checks, again = evaluate(repo, number)
+    drift = [f"{name}: {detail}" for name, ok, detail in checks if not ok]
+    if again["head"] != context["head"]:
+        drift.append("headが動いた")
+    if again["base"] != context["base"]:
+        drift.append("宛先ブランチが変わった")
+    if again["tip"] != context["tip"]:
+        drift.append("trunkの先端が動いた")
+    return drift
 
 
 def cmd_merge(repo: str, number: int) -> int:
@@ -381,9 +395,10 @@ def cmd_merge(repo: str, number: int) -> int:
     if current["merged"]:
         print(f"マージ済み: {current['merge_commit_sha']}")
         _, project = load_policy(repo)
-        rules = ((project or {}).get("merge_rules") or {}).get(repo) or {}
+        rules = ((project or {}).get("merge_rules") or {}).get(repo.lower()) or {}
         deploy = (rules.get("deploys") or {}).get(current["base"]["ref"])
-        return follow_deploy(repo, number, current, deploy) if deploy and not deploy_settled(repo, number) else 0
+        workflow = (rules.get("deploy_workflows") or {}).get(current["base"]["ref"])
+        return follow_deploy(repo, number, current, deploy, workflow) if deploy and not deploy_settled(repo, number) else 0
     checks, context = evaluate(repo, number)
     show(checks)
     head, base = context["head"], context["base"]
@@ -413,7 +428,8 @@ def cmd_merge(repo: str, number: int) -> int:
     print(f"マージした: {merged['html_url']} → {base} {merge_sha[:7]}")
 
     deploy = (context["rules"].get("deploys") or {}).get(base)
-    return follow_deploy(repo, number, merged, deploy) if deploy else 0
+    workflow = (context["rules"].get("deploy_workflows") or {}).get(base)
+    return follow_deploy(repo, number, merged, deploy, workflow) if deploy else 0
 
 
 def cmd_verdict(repo: str, number: int, spec_path: Path) -> int:
@@ -422,6 +438,9 @@ def cmd_verdict(repo: str, number: int, spec_path: Path) -> int:
     head = pr["head"]["sha"]
     if spec.get("head_sha") != head:
         raise Refused(f"検証したhead {spec.get('head_sha')} と今のhead {head} が違う。検証し直す")
+    tip = branch_tip(repo, pr["base"]["ref"])
+    if spec.get("base_sha") != tip:
+        raise Refused(f"検証したbase {spec.get('base_sha')} と今の {pr['base']['ref']} の先端 {tip} が違う。載せ直して検証し直す")
     problems = lane_problems(spec.get("lanes"))
     if problems:
         raise Refused("; ".join(problems))
@@ -443,7 +462,7 @@ def cmd_verdict(repo: str, number: int, spec_path: Path) -> int:
     payload = {
         "verdict": verdict,
         "head_sha": head,
-        "base_sha": branch_tip(repo, pr["base"]["ref"]),
+        "base_sha": tip,
         "patch_id": patch_id(repo, number, files),
         "lanes": {lane: spec["lanes"][lane] for lane in LANES},
         "verifier_models": sorted(verifiers),
@@ -490,7 +509,7 @@ def render(payload: dict[str, Any], spec: dict[str, Any]) -> str:
         "",
         spec.get("summary", "").strip() + human,
         "",
-        f"`sirius-merge` はこの判定を head `{payload['head_sha'][:7]}` と patch-id `{payload['patch_id'][:12]}` に対してだけ使います。",
+        f"`sirius-merge` はこの判定を head `{payload['head_sha'][:7]}` と base `{payload['base_sha'][:7]}` の組に対してだけ使います。",
     ])
 
 

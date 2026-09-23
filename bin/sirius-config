@@ -41,6 +41,36 @@ PROJECT_KEYS = {
     "merge_rules", "notes", "needs_review",
 }
 SOURCE_KINDS = {"slack", "line"}
+RULE_KEYS = {"ci_required", "approvals", "human_branches", "deploys", "deploy_workflows"}
+
+
+def validate_rules(path, repos, rules):
+    """merge_rules loosen nothing silently: unknown keys and bad values are errors."""
+    errors = []
+    if not isinstance(rules, dict):
+        return [f"{path}: merge_rules must be a mapping"]
+    listed = {r.lower() for r in repos}
+    for repo, rule in rules.items():
+        where = f"{path}: merge_rules.{repo}"
+        if str(repo).lower() not in listed:
+            errors.append(f"{where}: repository is not in repos")
+        if not isinstance(rule, dict):
+            errors.append(f"{where}: must be a mapping")
+            continue
+        unknown = set(rule) - RULE_KEYS
+        if unknown:
+            errors.append(f"{where}: unknown keys {sorted(unknown)}")
+        if "ci_required" in rule and not isinstance(rule["ci_required"], bool):
+            errors.append(f"{where}.ci_required must be true or false")
+        if "approvals" in rule and (not isinstance(rule["approvals"], int)
+                                    or isinstance(rule["approvals"], bool) or rule["approvals"] < 0):
+            errors.append(f"{where}.approvals must be a non-negative integer")
+        for key in ("human_branches", "deploys", "deploy_workflows"):
+            value = rule.get(key, {})
+            if not isinstance(value, dict) or not all(
+                    isinstance(k, str) and isinstance(v, str) and v.strip() for k, v in value.items()):
+                errors.append(f"{where}.{key} must map branch names to non-empty text")
+    return errors
 
 
 class ConfigError(Exception):
@@ -125,6 +155,7 @@ def validate_project(path, data):
                 errors.append(f"{path}: line entry needs an exact chat title: {e!r}")
             if isinstance(e, dict) and any("*" in str(v) for v in e.values()):
                 errors.append(f"{path}: wildcards do not grant scope: {e!r}")
+    errors.extend(validate_rules(path, repos, data.get("merge_rules") or {}))
     if data.get("implement_gate", "human") not in IMPLEMENT_GATES:
         errors.append(f"{path}: implement_gate must be one of {IMPLEMENT_GATES}")
     if data.get("merge", "manual") not in MERGE_MODES:
@@ -154,11 +185,11 @@ def resolve(glob, data):
     return {
         "name": data["name"],
         "dir": expand(data.get("dir")),
-        "repos": data.get("repos") or [],
+        "repos": [r.lower() for r in data.get("repos") or []],
         "sources": data.get("sources") or {},
         "implement_gate": gate,
         "merge": merge,
-        "merge_rules": data.get("merge_rules") or {},
+        "merge_rules": {k.lower(): v for k, v in (data.get("merge_rules") or {}).items()},
         "notes": data.get("notes") or "",
         "downgrades": notes,
     }
@@ -236,7 +267,7 @@ def main():
         print(json.dumps(p, ensure_ascii=False, indent=2))
         return 0
     if args.cmd == "repo":
-        p = next((x for x in projects if args.repo in x["repos"]), None)
+        p = next((x for x in projects if args.repo.lower() in x["repos"]), None)
         if not p:
             print(json.dumps({"ok": False, "errors": [f"{args.repo} is not in any project"]}))
             return 1
