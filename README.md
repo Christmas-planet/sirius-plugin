@@ -58,7 +58,7 @@ Slack / LINE ─▶ Issue ─▶ 実装（ドラフト PR）─▶ 独立レビ�
 | `merge.mode` | `manual` | PR を ready にして知らせる。人がタイトル先頭に `[merge]` を付けたら Sirius がマージする |
 | | `auto` | 下の条件がすべてそろったら、Sirius が `[merge]` を付けてマージする |
 | `reply.mode` | `draft` | 送信せず、提案する返信文を Issue やレポートに書くだけ |
-| | `send` | 固定テンプレートの返信を実際に送る（Slackは `slack_send_message`、LINEはComputer Use） |
+| | `send` | 会話に合わせた自然な返信を実際に送る（Slackは `slack_send_message`、LINEはComputer Use）。書き方は `references/reply-contract.md` と `reply.style` |
 
 ラベルは使いません。状態は、タイトル先頭の `[implement]` / `[merge]`、Issue の目印コメント（`working` / `waiting` / `blocked` / `ready`）、PR が draft か ready かで表します。`[merge]` を付けた後に新しいコミットが入った PR はマージしないので、見直してから付け直してください。
 

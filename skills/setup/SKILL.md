@@ -27,7 +27,7 @@ disable-model-invocation: true
    - LINE: アプリに表示されている通りの正確なチャット名（このMacだけ）。
    - `implement.gate`: `human` は人がIssueタイトルの先頭に `[implement]` を付けてからSiriusが実装することを意味する。`auto` は、受入条件がはっきりしているIssueにSirius自身が作成時から接頭辞を付けることを意味する。
    - `merge.mode`: `manual` は人がreadyなPRのタイトル先頭に `[merge]` を付け、その後Siriusがマージすることを意味する。`auto` は、実装役とは別モデルによる独立検証の判定（PASS）、CI、baseブランチの条件がすべて揃ったときにSiriusがマージすることを意味する。承認は同一GitHubアカウントで行い、別のレビュー用アカウントは使わない。
-   - `reply.mode`: `draft` はSiriusが送信せず提案文をIssue/レポートに書くだけ。`send` はSiriusが実際に返信する（Slackは `slack_send_message`、LINEはComputer Useでのアプリ操作）。返信の文面は「Issueを起票/追記しました」という固定テンプレートで、メッセージの内容に応じて変わらない。
+   - `reply.mode`: `draft` はSiriusが送信せず提案文をIssue/レポートに書くだけ。`send` はSiriusが実際に返信する（Slackは `slack_send_message`、LINEはComputer Useでのアプリ操作）。返信は、オペレーター本人がその会話で過去に送った文面に合わせた自然な日本語で書く。`reply.style` に文体Skill名（例: `write-like-kazuki`）か自由記述の指示を、`reply.never` に絶対に言わないことを書ける。
    - `merge` の下の各種ルール: `ci_required`、`approvals`（独立検証の判定に加えて必要な人の承認数）、`human_branches`（ブランチ→理由、`*` は全ブランチ）、`deploys`（ブランチ→そのマージが何をデプロイするか）、`deploy_workflows`（ブランチ→デプロイを行うActionsワークフロー名）。
    - `investigate` / `review` / `verify` / `forbidden`: どこまで埋めるかはユーザーに委ねる。分からない・決めていないものは空のままにしてよいと伝える。
 4. [テンプレート](../../templates/repo.yaml)から `~/.sirius/repos/<owner>__<repo>.yaml`（`owner/repo` を小文字化し `/` を `__` に置き換えたファイル名）を書き、`dir` を現在のディレクトリに設定する。

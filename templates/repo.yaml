@@ -12,8 +12,8 @@ sources:
 
 reply:                       # Slack/LINEで、依頼してきた人へどう返信するか
   mode: draft                # draft: 送信せず、提案する返信文をIssue/レポートに書くだけ
-                              # send: 実際に送信する（Slackはslack_send_message；LINEには送信経路がない）
-  style: ""                  # 任意の自由記述。例: "write-like-kazuki"
+                              # send: 実際に送信する（Slackはslack_send_message、LINEはComputer Use）
+  style: ""                  # 文体Skill名か自由記述。例: "write-like-kazuki"（references/reply-contract.md）
   never: []                  # 絶対に言ってはいけない・約束してはいけないことの自由記述リスト
 
 investigate:                 # 実装役・レビュー役のモデルが読んで従うべき自由記述
