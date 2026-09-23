@@ -82,6 +82,13 @@ Keep the PR's current base branch (it may be another PR's branch in a stack); do
 not retarget it, open a new PR, or rewrite history. Triage every unresolved
 review thread and bot comment on its merits: fix it, or reply with a concrete
 reason for not fixing it. Reply on each thread with what you did.
+Other workers may be handling other PRs of the same repository at the same
+time. Fetch review data with the PR number in the API path, save it only under
+a path that names that PR (never a shared name like /tmp/comments.json), and
+before using it check that every comment's pull_request_url ends in
+/pulls/<this PR number>. Give any reviewer or subagent the PR number and the
+exact comment IDs, and have it re-check the same thing; a review run against
+another PR's comments is void, not a verdict.
 
 Sirius rules override poteto-mode wherever they conflict:
 - Never merge, arm auto-merge, run `gh pr ready`, change a PR or Issue title,
