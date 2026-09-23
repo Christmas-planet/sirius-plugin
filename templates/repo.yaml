@@ -1,0 +1,51 @@
+# ~/.sirius/repos/<owner>__<repo>.yaml — one file per GitHub repository. Edited by the operator.
+# The file name must be the repo lowercased with "/" replaced by "__",
+# e.g. repo "acme/my-repo" -> acme__my-repo.yaml
+repo: acme/my-repo               # exact owner/repo; a repo belongs to one file only
+dir: ~/projects/acme/my-repo     # optional local checkout; used to find the repo from the current directory
+
+sources:
+  slack:
+    - {workspace: T0123456789, channel: C0123456789}   # exact IDs, no names or wildcards
+  line:
+    - {chat: "Exact chat title"}                         # native macOS LINE app only
+
+reply:                       # how Sirius replies to the person who asked, in Slack/LINE
+  mode: draft                # draft: never send, write the proposed text into the Issue/report instead
+                              # send: actually send it (Slack: slack_send_message; LINE has no send path)
+  style: ""                  # optional free text, e.g. "write-like-kazuki"
+  never: []                  # free text list of things never to say or promise
+
+investigate:                 # prose the implementing/reviewing model reads and follows
+  read_first: []              # paths inside the repo to read before working, e.g. [CLAUDE.md, docs/]
+  knowledge: []               # info OUTSIDE the repo the model should know, e.g.
+                               #   - {where: "LINE chat with the owner", what: "design preferences"}
+  ask_user_when: []           # free text list of situations that need the user's input, not a guess
+
+implement:
+  gate: human                 # human: a person adds `[implement]`; auto: Sirius adds it for clear Issues
+  conventions: []             # optional free text list, e.g. PR body format, commit rules
+
+review:
+  reviewer: ""                # claude | codex; optional, falls back to config.yaml's global reviewer
+  focus: []                   # optional free text list of what the reviewer should pay attention to
+
+verify:
+  commands: []                 # optional shell commands to run as part of verification
+  live: []                     # optional prose, e.g. [{how: "iOS simulator", evidence: "screenshot"}]
+  not_enough: []               # optional free text list, e.g. ["a build log alone is not display proof"]
+
+merge:
+  mode: manual                 # manual: a person merges; auto: sirius-merge merges when every check passes
+  ci_required: true
+  approvals: 0                 # human approvals needed in addition to the reviewer account
+  human_branches: {}           # e.g. {main: "deploys to production"} or {"*": "reason"}
+  deploys: {}                  # e.g. {main: "Vercel production"}
+  deploy_workflows: {}         # e.g. {main: "Deploy"}; this Actions workflow is watched and a failure opens a revert PR.
+                                # Without it the deploy is reported as unverified.
+
+forbidden: []                  # free text list of things the model must never do in this repo
+
+needs_review: false             # unchanged semantics: true forces human/manual/draft until the operator clears it
+notes: |
+  Anything the agents should know about this repo.

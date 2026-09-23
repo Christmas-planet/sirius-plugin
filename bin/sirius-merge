@@ -8,7 +8,7 @@ merge: auto のPRは、レビュー用アカウントの判定と承認がそろ
   sirius-merge merge   <owner/repo> <pr>               条件がすべてそろったときだけマージする。
   sirius-merge verdict <owner/repo> <pr> <lanes.json>  検証結果を判定コメントとしてPRへ投稿する。
 
-規則は ~/.sirius/config.yaml と ~/.sirius/projects/<name>.yaml（sirius-config で解決）、
+規則は ~/.sirius/config.yaml と ~/.sirius/repos/<owner>__<repo>.yaml（sirius-config で解決）、
 停止スイッチは ~/.sirius/STOP、記録は ~/.sirius/logs/merges.tsv。
 
 判定はモデル名ではなく GitHub アカウントで区別する。config.yaml の identities.reviewer が
@@ -85,15 +85,16 @@ def _config_module() -> Any:
 
 
 def load_policy(repo: str) -> tuple[dict[str, Any], dict[str, Any] | None]:
-    """Return (global config, effective project) for repo. Config errors refuse the merge."""
+    """Return (global config, effective repo config) for repo. Config errors refuse the merge."""
     config = _config_module()
     try:
-        glob, projects, errors = config.load_all()
+        glob, repos, errors = config.load_all()
     except config.ConfigError as error:
         raise Refused(str(error))
     if errors:
         raise Refused("設定にエラーがある: " + " / ".join(errors))
-    return glob, next((p for p in projects if repo.lower() in p["repos"]), None)
+    found = next((r for r in repos if r["repo"] == repo.lower()), None) if repo else None
+    return glob, found
 
 
 def reviewer_identity() -> dict[str, Any]:
@@ -248,16 +249,16 @@ def evaluate(repo: str, number: int) -> tuple[list[Check], dict[str, Any]]:
         checks.append((name, ok, detail))
 
     add("停止スイッチ", not STOP_PATH.exists(), f"{STOP_PATH} がある" if STOP_PATH.exists() else "なし")
-    policy, project = load_policy(repo)
-    add("対象リポジトリ", project is not None, f"projects/{project['name']}.yaml" if project else "どの projects/*.yaml にもない")
-    project = project or {"merge": "manual", "merge_rules": {}, "downgrades": []}
-    mode = project["merge"]
-    rules = (project.get("merge_rules") or {}).get(repo.lower()) or {}
+    policy, repo_cfg = load_policy(repo)
+    add("対象リポジトリ", repo_cfg is not None, f"repos/{repo_cfg['file']}" if repo_cfg else "どの repos/*.yaml にもない")
+    repo_cfg = repo_cfg or {"merge": {"mode": "manual"}, "downgrades": []}
+    mode = repo_cfg["merge"]["mode"]
+    rules = repo_cfg["merge"]
 
     pr = pull_request(repo, number)
     head, base = pr["head"]["sha"], pr["base"]["ref"]
     add("PRの状態", pr["state"] == "open" and not pr["draft"], f"state={pr['state']} draft={pr['draft']}")
-    add("マージの方式", True, mode + ("（" + " / ".join(project["downgrades"]) + "）" if project.get("downgrades") else ""))
+    add("マージの方式", True, mode + ("（" + " / ".join(repo_cfg["downgrades"]) + "）" if repo_cfg.get("downgrades") else ""))
 
     tip = branch_tip(repo, base)
     behind = api(f"repos/{repo}/compare/{tip}...{head}")["behind_by"]
@@ -432,8 +433,8 @@ def cmd_merge(repo: str, number: int) -> int:
     current = api(f"repos/{repo}/pulls/{number}")
     if current["merged"]:
         print(f"マージ済み: {current['merge_commit_sha']}")
-        _, project = load_policy(repo)
-        rules = ((project or {}).get("merge_rules") or {}).get(repo.lower()) or {}
+        _, repo_cfg = load_policy(repo)
+        rules = (repo_cfg or {}).get("merge") or {}
         deploy = (rules.get("deploys") or {}).get(current["base"]["ref"])
         workflow = (rules.get("deploy_workflows") or {}).get(current["base"]["ref"])
         return follow_deploy(repo, number, current, deploy, workflow) if deploy and not deploy_settled(repo, number) else 0

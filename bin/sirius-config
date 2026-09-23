@@ -1,11 +1,17 @@
 #!/usr/bin/env python3
 """Load, validate, and resolve Sirius configuration from ~/.sirius.
 
-Global:   ~/.sirius/config.yaml
-Projects: ~/.sirius/projects/<name>.yaml
+Global: ~/.sirius/config.yaml
+Repos:  ~/.sirius/repos/<owner>__<repo>.yaml   (one file per GitHub repository)
 
-Gate settings resolve to the stricter of the global ceiling and the project value.
-Nothing inside a project repository is read, so a PR cannot loosen its own gate.
+Investigation method, review approach, and verification method are decided per
+repository, so the unit of configuration is one repository, not an abstract
+"project". A repo file is keyed by its own `repo: owner/repo` field, and the
+file name must equal that repo lowercased with "/" replaced by "__".
+
+Gate settings (implement.gate, merge.mode, reply.mode) resolve to the stricter
+of the global ceiling in config.yaml and the repo's own value. Nothing inside
+a project repository is read, so a PR cannot loosen its own gate.
 """
 
 import argparse
@@ -20,6 +26,7 @@ HOME = Path(os.environ.get("SIRIUS_HOME", Path.home() / ".sirius"))
 # Ordered from strictest to loosest.
 IMPLEMENT_GATES = ["human", "auto"]
 MERGE_MODES = ["manual", "auto"]
+REPLY_MODES = ["draft", "send"]
 SCHEDULERS = ["none", "loop", "launchd", "monitor"]
 AGENTS = ["claude", "codex"]
 
@@ -30,46 +37,19 @@ GLOBAL_DEFAULTS = {
     "reviewer": "codex",
     "implement_gate": "human",
     "merge": "manual",
+    "reply": {"mode": "draft"},
     "human_paths": [".github/workflows/"],
     "identities": {},
     "limits": {"new_issues_per_source": 5, "concurrent_workers": 2},
 }
 
-PROJECT_KEYS = {
-    "name", "dir", "repos", "sources", "implement_gate", "merge",
-    "merge_rules", "notes", "needs_review",
+REPO_KEYS = {
+    "repo", "dir", "sources", "reply", "investigate", "implement", "review",
+    "verify", "merge", "forbidden", "needs_review", "notes",
 }
 SOURCE_KINDS = {"slack", "line"}
 RULE_KEYS = {"ci_required", "approvals", "human_branches", "deploys", "deploy_workflows"}
-
-
-def validate_rules(path, repos, rules):
-    """merge_rules loosen nothing silently: unknown keys and bad values are errors."""
-    errors = []
-    if not isinstance(rules, dict):
-        return [f"{path}: merge_rules must be a mapping"]
-    listed = {r.lower() for r in repos}
-    for repo, rule in rules.items():
-        where = f"{path}: merge_rules.{repo}"
-        if str(repo).lower() not in listed:
-            errors.append(f"{where}: repository is not in repos")
-        if not isinstance(rule, dict):
-            errors.append(f"{where}: must be a mapping")
-            continue
-        unknown = set(rule) - RULE_KEYS
-        if unknown:
-            errors.append(f"{where}: unknown keys {sorted(unknown)}")
-        if "ci_required" in rule and not isinstance(rule["ci_required"], bool):
-            errors.append(f"{where}.ci_required must be true or false")
-        if "approvals" in rule and (not isinstance(rule["approvals"], int)
-                                    or isinstance(rule["approvals"], bool) or rule["approvals"] < 0):
-            errors.append(f"{where}.approvals must be a non-negative integer")
-        for key in ("human_branches", "deploys", "deploy_workflows"):
-            value = rule.get(key, {})
-            if not isinstance(value, dict) or not all(
-                    isinstance(k, str) and isinstance(v, str) and v.strip() for k, v in value.items()):
-                errors.append(f"{where}.{key} must map branch names to non-empty text")
-    return errors
+MERGE_KEYS = RULE_KEYS | {"mode"}
 
 
 class ConfigError(Exception):
@@ -113,32 +93,93 @@ def load_global():
     if not isinstance(data, dict):
         raise ConfigError(f"{path}: top level must be a mapping")
     cfg = {**GLOBAL_DEFAULTS, **data}
+    # reply is a nested mapping; merge it one level deep so a partial
+    # `reply: {style: ...}` in config.yaml does not silently drop the default mode.
+    cfg["reply"] = {**GLOBAL_DEFAULTS["reply"], **(data.get("reply") or {})}
     errors = []
     for key, allowed in (("implement_gate", IMPLEMENT_GATES), ("merge", MERGE_MODES),
                          ("scheduler", SCHEDULERS), ("implementer", AGENTS), ("reviewer", AGENTS)):
         if cfg[key] not in allowed:
             errors.append(f"{path}: {key} must be one of {allowed}")
+    if cfg["reply"].get("mode") not in REPLY_MODES:
+        errors.append(f"{path}: reply.mode must be one of {REPLY_MODES}")
     if errors:
         raise ConfigError("\n".join(errors))
     return cfg
 
 
-def validate_project(path, data):
+def _str_list_errors(path, label, value):
+    if value is None:
+        return []
+    if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+        return [f"{path}: {label} must be a list of strings"]
+    return []
+
+
+def _dict_list_errors(path, label, value, keys):
+    """A list of mappings, each with exactly `keys`, all non-empty strings."""
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        return [f"{path}: {label} must be a list"]
+    errors = []
+    for i, entry in enumerate(value):
+        where = f"{path}: {label}[{i}]"
+        if not isinstance(entry, dict):
+            errors.append(f"{where} must be a mapping")
+            continue
+        unknown = set(entry) - keys
+        missing = keys - set(entry)
+        if unknown:
+            errors.append(f"{where}: unknown keys {sorted(unknown)}")
+        if missing:
+            errors.append(f"{where}: missing keys {sorted(missing)}")
+        for k in keys & set(entry):
+            if not isinstance(entry[k], str) or not entry[k].strip():
+                errors.append(f"{where}.{k} must be a non-empty string")
+    return errors
+
+
+def validate_merge(path, merge):
+    """merge loosens nothing silently: unknown keys and bad values are errors."""
+    errors = []
+    if not isinstance(merge, dict):
+        return [f"{path}: merge must be a mapping"]
+    unknown = set(merge) - MERGE_KEYS
+    if unknown:
+        errors.append(f"{path}: merge has unknown keys {sorted(unknown)}")
+    if "mode" in merge and merge["mode"] not in MERGE_MODES:
+        errors.append(f"{path}: merge.mode must be one of {MERGE_MODES}")
+    if "ci_required" in merge and not isinstance(merge["ci_required"], bool):
+        errors.append(f"{path}: merge.ci_required must be true or false")
+    if "approvals" in merge and (not isinstance(merge["approvals"], int)
+                                 or isinstance(merge["approvals"], bool) or merge["approvals"] < 0):
+        errors.append(f"{path}: merge.approvals must be a non-negative integer")
+    for key in ("human_branches", "deploys", "deploy_workflows"):
+        value = merge.get(key, {})
+        if not isinstance(value, dict) or not all(
+                isinstance(k, str) and isinstance(v, str) and v.strip() for k, v in value.items()):
+            errors.append(f"{path}: merge.{key} must map branch names to non-empty text")
+    return errors
+
+
+def validate_repo(path, data):
     errors = []
     if not isinstance(data, dict):
         return [f"{path}: top level must be a mapping"]
-    unknown = set(data) - PROJECT_KEYS
+    unknown = set(data) - REPO_KEYS
     if unknown:
         errors.append(f"{path}: unknown keys {sorted(unknown)}")
-    if data.get("name") != path.stem:
-        errors.append(f"{path}: name must equal the file name ({path.stem})")
-    repos = data.get("repos") or []
-    if not isinstance(repos, list):
-        errors.append(f"{path}: repos must be a list")
-        repos = []
-    for r in repos:
-        if not isinstance(r, str) or r.count("/") != 1 or "*" in r:
-            errors.append(f"{path}: repo {r!r} must be an exact owner/repo")
+
+    repo = data.get("repo")
+    if not isinstance(repo, str) or repo.count("/") != 1 or "*" in repo:
+        errors.append(f"{path}: repo must be an exact owner/repo string")
+        repo = None
+    if repo:
+        expected_stem = repo.lower().replace("/", "__")
+        if path.stem != expected_stem:
+            errors.append(f"{path}: file name must be {expected_stem}.yaml (derived from repo {repo!r})")
+
     sources = data.get("sources") or {}
     if not isinstance(sources, dict):
         errors.append(f"{path}: sources must be a mapping")
@@ -154,41 +195,145 @@ def validate_project(path, data):
                 errors.append(f"{path}: line entry needs an exact chat title: {e!r}")
             if isinstance(e, dict) and any("*" in str(v) for v in e.values()):
                 errors.append(f"{path}: wildcards do not grant scope: {e!r}")
-    errors.extend(validate_rules(path, repos, data.get("merge_rules") or {}))
-    if data.get("implement_gate", "human") not in IMPLEMENT_GATES:
-        errors.append(f"{path}: implement_gate must be one of {IMPLEMENT_GATES}")
-    if data.get("merge", "manual") not in MERGE_MODES:
-        errors.append(f"{path}: merge must be one of {MERGE_MODES}")
+
+    reply = data.get("reply") or {}
+    if not isinstance(reply, dict):
+        errors.append(f"{path}: reply must be a mapping")
+        reply = {}
+    else:
+        if "mode" in reply and reply["mode"] not in REPLY_MODES:
+            errors.append(f"{path}: reply.mode must be one of {REPLY_MODES}")
+        if "style" in reply and not isinstance(reply["style"], str):
+            errors.append(f"{path}: reply.style must be a string")
+        errors.extend(_str_list_errors(path, "reply.never", reply.get("never")))
+
+    investigate = data.get("investigate") or {}
+    if not isinstance(investigate, dict):
+        errors.append(f"{path}: investigate must be a mapping")
+        investigate = {}
+    else:
+        errors.extend(_str_list_errors(path, "investigate.read_first", investigate.get("read_first")))
+        errors.extend(_dict_list_errors(path, "investigate.knowledge", investigate.get("knowledge"),
+                                        {"where", "what"}))
+        errors.extend(_str_list_errors(path, "investigate.ask_user_when", investigate.get("ask_user_when")))
+
+    implement = data.get("implement") or {}
+    if not isinstance(implement, dict):
+        errors.append(f"{path}: implement must be a mapping")
+        implement = {}
+    else:
+        if "gate" in implement and implement["gate"] not in IMPLEMENT_GATES:
+            errors.append(f"{path}: implement.gate must be one of {IMPLEMENT_GATES}")
+        errors.extend(_str_list_errors(path, "implement.conventions", implement.get("conventions")))
+
+    review = data.get("review") or {}
+    if not isinstance(review, dict):
+        errors.append(f"{path}: review must be a mapping")
+        review = {}
+    else:
+        if review.get("reviewer") and review["reviewer"] not in AGENTS:
+            errors.append(f"{path}: review.reviewer must be one of {AGENTS}")
+        errors.extend(_str_list_errors(path, "review.focus", review.get("focus")))
+
+    verify = data.get("verify") or {}
+    if not isinstance(verify, dict):
+        errors.append(f"{path}: verify must be a mapping")
+        verify = {}
+    else:
+        errors.extend(_str_list_errors(path, "verify.commands", verify.get("commands")))
+        errors.extend(_dict_list_errors(path, "verify.live", verify.get("live"), {"how", "evidence"}))
+        errors.extend(_str_list_errors(path, "verify.not_enough", verify.get("not_enough")))
+
+    errors.extend(validate_merge(path, data.get("merge") or {}))
+    errors.extend(_str_list_errors(path, "forbidden", data.get("forbidden")))
+
+    if "needs_review" in data and not isinstance(data["needs_review"], bool):
+        errors.append(f"{path}: needs_review must be true or false")
+    if "notes" in data and not isinstance(data["notes"], str):
+        errors.append(f"{path}: notes must be a string")
+    if "dir" in data and data["dir"] is not None and not isinstance(data["dir"], str):
+        errors.append(f"{path}: dir must be a string")
+
     return errors
 
 
-def resolve(glob, data):
-    """Return the effective project config plus reasons for any downgrade."""
+def resolve(glob, path, data):
+    """Return the effective repo config plus reasons for any downgrade."""
     notes = []
-    gate = stricter(IMPLEMENT_GATES, glob["implement_gate"], data.get("implement_gate", "human"))
-    merge = stricter(MERGE_MODES, glob["merge"], data.get("merge", "manual"))
-    if merge != data.get("merge", "manual"):
-        notes.append(f"merge capped at {merge!r} by config.yaml")
-    if merge == "auto" and glob["implementer"] == glob["reviewer"]:
-        merge = "manual"
+
+    declared_gate = (data.get("implement") or {}).get("gate", "human")
+    gate = stricter(IMPLEMENT_GATES, glob["implement_gate"], declared_gate)
+
+    raw_merge = data.get("merge") or {}
+    declared_merge_mode = raw_merge.get("mode", "manual")
+    merge_mode = stricter(MERGE_MODES, glob["merge"], declared_merge_mode)
+    if merge_mode != declared_merge_mode:
+        notes.append(f"merge capped at {merge_mode!r} by config.yaml")
+    if merge_mode == "auto" and glob["implementer"] == glob["reviewer"]:
+        merge_mode = "manual"
         notes.append("merge auto needs a reviewer model different from the implementer; using 'manual'")
     ids = glob.get("identities") or {}
-    reviewer = ids.get("reviewer") or {}
-    if merge == "auto" and not (reviewer.get("login") and reviewer.get("gh_config_dir")):
-        merge = "manual"
+    reviewer_identity = ids.get("reviewer") or {}
+    if merge_mode == "auto" and not (reviewer_identity.get("login") and reviewer_identity.get("gh_config_dir")):
+        merge_mode = "manual"
         notes.append("merge auto needs identities.reviewer (login, gh_config_dir); using 'manual'")
+
+    declared_reply = (data.get("reply") or {}).get("mode", "draft")
+    reply_mode = stricter(REPLY_MODES, glob["reply"]["mode"], declared_reply)
+    if reply_mode != declared_reply:
+        notes.append(f"reply capped at {reply_mode!r} by config.yaml")
+
     if data.get("needs_review"):
         gate = "human"
-        merge = "manual"
+        merge_mode = "manual"
+        reply_mode = "draft"
         notes.append("needs_review is set; human gate until the operator clears it")
+
+    merge_block = {"mode": merge_mode}
+    for key in RULE_KEYS:
+        if key in raw_merge:
+            merge_block[key] = raw_merge[key]
+
+    reply = data.get("reply") or {}
+    investigate = data.get("investigate") or {}
+    implement = data.get("implement") or {}
+    review = data.get("review") or {}
+    verify = data.get("verify") or {}
+
     return {
-        "name": data["name"],
+        "repo": data["repo"].lower(),
+        "file": path.name,
         "dir": expand(data.get("dir")),
-        "repos": [r.lower() for r in data.get("repos") or []],
-        "sources": data.get("sources") or {},
-        "implement_gate": gate,
-        "merge": merge,
-        "merge_rules": {k.lower(): v for k, v in (data.get("merge_rules") or {}).items()},
+        "sources": {
+            "slack": (data.get("sources") or {}).get("slack") or [],
+            "line": (data.get("sources") or {}).get("line") or [],
+        },
+        "reply": {
+            "mode": reply_mode,
+            "style": reply.get("style") or "",
+            "never": reply.get("never") or [],
+        },
+        "investigate": {
+            "read_first": investigate.get("read_first") or [],
+            "knowledge": investigate.get("knowledge") or [],
+            "ask_user_when": investigate.get("ask_user_when") or [],
+        },
+        "implement": {
+            "gate": gate,
+            "conventions": implement.get("conventions") or [],
+        },
+        "review": {
+            "reviewer": review.get("reviewer") or glob["reviewer"],
+            "focus": review.get("focus") or [],
+        },
+        "verify": {
+            "commands": verify.get("commands") or [],
+            "live": verify.get("live") or [],
+            "not_enough": verify.get("not_enough") or [],
+        },
+        "merge": merge_block,
+        "forbidden": data.get("forbidden") or [],
+        "needs_review": bool(data.get("needs_review")),
         "notes": data.get("notes") or "",
         "downgrades": notes,
     }
@@ -196,38 +341,37 @@ def resolve(glob, data):
 
 def load_all():
     glob = load_global()
-    projects, errors = [], []
-    pdir = HOME / "projects"
-    for path in sorted(pdir.glob("*.yaml")) if pdir.exists() else []:
+    repos, errors = [], []
+    rdir = HOME / "repos"
+    for path in sorted(rdir.glob("*.yaml")) if rdir.exists() else []:
         try:
             data = load_yaml(path)
         except ConfigError as exc:
             errors.append(str(exc))
             continue
-        errs = validate_project(path, data)
+        errs = validate_repo(path, data)
         if errs:
             errors.extend(errs)
             continue
-        projects.append(resolve(glob, data))
+        repos.append(resolve(glob, path, data))
     seen = {}
-    for p in projects:
-        for r in p["repos"]:
-            if r in seen:
-                errors.append(f"repo {r} is claimed by both {seen[r]} and {p['name']}")
-            seen[r] = p["name"]
-    return glob, projects, errors
+    for r in repos:
+        if r["repo"] in seen:
+            errors.append(f"repo {r['repo']} is claimed by both {seen[r['repo']]} and {r['file']}")
+        seen[r["repo"]] = r["file"]
+    return glob, repos, errors
 
 
-def find_by_dir(projects, cwd):
+def find_by_dir(repos, cwd):
     # samefile, not string comparison: macOS paths are case-insensitive.
     chain = [Path(cwd).resolve(), *Path(cwd).resolve().parents]
     best, best_depth = None, -1
-    for p in projects:
-        if not p["dir"] or not Path(p["dir"]).exists():
+    for r in repos:
+        if not r["dir"] or not Path(r["dir"]).exists():
             continue
         for depth, c in enumerate(reversed(chain)):
-            if c.samefile(p["dir"]) and depth > best_depth:
-                best, best_depth = p, depth
+            if c.samefile(r["dir"]) and depth > best_depth:
+                best, best_depth = r, depth
     return best
 
 
@@ -236,41 +380,38 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("validate")
     sub.add_parser("show")
-    pp = sub.add_parser("project")
-    pp.add_argument("name", nargs="?")
-    pp.add_argument("--dir", default=None)
-    rp = sub.add_parser("repo")
-    rp.add_argument("repo")
+    rp = sub.add_parser(
+        "repo",
+        help="Show one repo's resolved config, by exact owner/repo or by --dir (default: cwd).",
+    )
+    group = rp.add_mutually_exclusive_group()
+    group.add_argument("repo", nargs="?", help="exact owner/repo")
+    group.add_argument("--dir", default=None, help="a checkout directory (default: current directory)")
     args = ap.parse_args()
 
     try:
-        glob, projects, errors = load_all()
+        glob, repos, errors = load_all()
     except ConfigError as exc:
         print(json.dumps({"ok": False, "errors": str(exc).splitlines()}, ensure_ascii=False))
         return 2
 
     if args.cmd == "validate":
         print(json.dumps({"ok": not errors, "errors": errors,
-                          "projects": [p["name"] for p in projects]}, ensure_ascii=False, indent=2))
+                          "repos": [r["repo"] for r in repos]}, ensure_ascii=False, indent=2))
         return 0 if not errors else 1
     if args.cmd == "show":
         print(json.dumps({"ok": not errors, "errors": errors, "global": glob,
-                          "projects": projects}, ensure_ascii=False, indent=2))
+                          "repos": repos}, ensure_ascii=False, indent=2))
         return 0 if not errors else 1
-    if args.cmd == "project":
-        p = (next((x for x in projects if x["name"] == args.name), None) if args.name
-             else find_by_dir(projects, args.dir or os.getcwd()))
-        if not p:
-            print(json.dumps({"ok": False, "errors": ["project not found"]}))
-            return 1
-        print(json.dumps(p, ensure_ascii=False, indent=2))
-        return 0
     if args.cmd == "repo":
-        p = next((x for x in projects if args.repo.lower() in x["repos"]), None)
-        if not p:
-            print(json.dumps({"ok": False, "errors": [f"{args.repo} is not in any project"]}))
+        if args.repo:
+            r = next((x for x in repos if x["repo"] == args.repo.lower()), None)
+        else:
+            r = find_by_dir(repos, args.dir or os.getcwd())
+        if not r:
+            print(json.dumps({"ok": False, "errors": ["repo not found"]}))
             return 1
-        print(json.dumps(p, ensure_ascii=False, indent=2))
+        print(json.dumps(r, ensure_ascii=False, indent=2))
         return 0
 
 

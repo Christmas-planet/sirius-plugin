@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 
 SIRIUS = Path(os.environ.get("SIRIUS_HOME", Path.home() / ".sirius")).expanduser()
-PROTECTED = [SIRIUS / "config.yaml", SIRIUS / "projects"]
+PROTECTED = [SIRIUS / "config.yaml", SIRIUS / "repos"]
 
 BASH_RULES = [
     (re.compile(r"\bgh\s+pr\s+merge\b"),
@@ -39,11 +39,12 @@ BASH_RULES = [
 ]
 TITLE_FLAG = re.compile(r"(?:--title|-t)(?:=|\s+)(?:'([^']*)'|\"([^\"]*)\"|(\S+))")
 REPO_FLAG = re.compile(r"(?:--repo|-R)(?:=|\s+)['\"]?([\w.-]+/[\w.-]+)")
-GATED = {"issue": ("[implement]", "implement_gate"), "pr": ("[merge]", "merge")}
+# Each gate's title prefix and the (section, key) path into a resolved `sirius-config repo` result.
+GATED = {"issue": ("[implement]", ("implement", "gate")), "pr": ("[merge]", ("merge", "mode"))}
 
 
-def project_for(repo):
-    """Effective project settings for repo, or None. Reads ~/.sirius through sirius-config."""
+def repo_config(repo):
+    """Effective resolved settings for repo, or None. Reads ~/.sirius through sirius-config."""
     import importlib.machinery
     import importlib.util
     path = Path(__file__).resolve().parent.parent / "bin" / "sirius-config"
@@ -51,30 +52,30 @@ def project_for(repo):
     module = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
     loader.exec_module(module)
     try:
-        _, projects, errors = module.load_all()
+        _, repos, errors = module.load_all()
     except module.ConfigError:
         return None
     if errors:
         return None
-    return next((p for p in projects if repo.lower() in p["repos"]), None)
+    return next((r for r in repos if r["repo"] == repo.lower()), None)
 
 
 def check_title_prefix(cmd):
     """[implement] on an Issue and [merge] on a PR are a person's go-ahead unless the
-    repository's project is set to auto for that gate."""
+    repository's own config is set to auto for that gate."""
     m = re.search(r"\bgh\s+(issue|pr)\s+(create|edit)\b", cmd)
     if not m:
         return
-    prefix, gate = GATED[m.group(1)]
+    prefix, (section, key) = GATED[m.group(1)]
     titles = [next(g for g in t.groups() if g is not None) for t in TITLE_FLAG.finditer(cmd)]
     if not any(t.lstrip().startswith(prefix) for t in titles):
         return
     repo = REPO_FLAG.search(cmd)
     if not repo:
-        block(f"Pass -R owner/repo when setting {prefix}, so the project's {gate} can be checked.")
-    project = project_for(repo.group(1))
-    if not project or project[gate] != "auto":
-        block(f"Only a person adds {prefix} in {repo.group(1)} ({gate} is not auto).")
+        block(f"Pass -R owner/repo when setting {prefix}, so the repo's {section}.{key} can be checked.")
+    cfg = repo_config(repo.group(1))
+    if not cfg or cfg[section][key] != "auto":
+        block(f"Only a person adds {prefix} in {repo.group(1)} ({section}.{key} is not auto).")
 
 
 def protected(path_str):
