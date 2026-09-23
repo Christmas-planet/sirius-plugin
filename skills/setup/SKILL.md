@@ -28,7 +28,7 @@ disable-model-invocation: true
    - 1つのソース（Slackチャンネル・LINEチャット）を書けるのは1か所だけ（リポジトリかworkspace）。複数のリポジトリ設定に同じソースを書くと、同じ依頼から重複したIssueが立ち、依頼者へ重複して返信するので、`sirius-config` がエラーにする。関連リポジトリが同じチャンネルを共有しているなら、ソースはリポジトリ設定ではなく下の「workspaceを登録する」に書く。
    - `implement.gate`: `human` は人がIssueタイトルの先頭に `[implement]` を付けてからSiriusが実装することを意味する。`auto` は、受入条件がはっきりしているIssueにSirius自身が作成時から接頭辞を付けることを意味する。
    - `merge.mode`: `manual` は人がreadyなPRのタイトル先頭に `[merge]` を付け、その後Siriusがマージすることを意味する。`auto` は、実装役とは別モデルによる独立検証の判定（PASS）、CI、baseブランチの条件がすべて揃ったときにSiriusがマージすることを意味する。承認は同一GitHubアカウントで行い、別のレビュー用アカウントは使わない。
-   - `reply.mode`: `draft` はSiriusが送信せず提案文をIssue/レポートに書くだけ。`send` はSiriusが実際に返信する（Slackは `slack_send_message`、LINEはComputer Useでのアプリ操作）。返信は、オペレーター本人がその会話で過去に送った文面に合わせた自然な日本語で書く。`reply.style` に文体Skill名（例: `write-like-kazuki`）か自由記述の指示を、`reply.never` に絶対に言わないことを書ける。
+   - `reply.mode`: `draft` はSiriusが送信せず提案文をIssue/レポートに書くだけ。`send` はSiriusが実際に返信する（SlackはClaude in ChromeでのSlack Webアプリ操作、LINEはComputer Useでのアプリ操作。MCPのSlackツールでは送らない）。返信は、オペレーター本人がその会話で過去に送った文面に合わせた自然な日本語で書く。`reply.style` に文体Skill名（例: `write-like-kazuki`）か自由記述の指示を、`reply.never` に絶対に言わないことを書ける。
    - `merge` の下の各種ルール: `ci_required`、`approvals`（独立検証の判定に加えて必要な人の承認数）、`human_branches`（ブランチ→理由、`*` は全ブランチ）、`deploys`（ブランチ→そのマージが何をデプロイするか）、`deploy_workflows`（ブランチ→デプロイを行うActionsワークフロー名）。
    - `investigate` / `review` / `verify` / `forbidden`: どこまで埋めるかはユーザーに委ねる。分からない・決めていないものは空のままにしてよいと伝える。
 4. [テンプレート](../../templates/repo.yaml)から `~/.sirius/repos/<owner>__<repo>.yaml`（`owner/repo` を小文字化し `/` を `__` に置き換えたファイル名）を書き、`dir` を現在のディレクトリに設定する。

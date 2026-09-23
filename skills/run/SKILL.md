@@ -29,7 +29,7 @@ LINE取り込みだけは追加で別扱いにする。ネイティブmacOS LINE
 
 - `gh auth status` が通り、対象範囲のすべてのリポジトリにpush権限で到達できる。
 - 設定された `implementer` と `reviewer`（リポジトリごとの `review.reviewer` を含む）が使える（どちらかが `codex` なら `codex --version`）。
-- 対象範囲の各ソース種別について、そのツールが使える: Slackにはコネクタ、LINEにはComputer UseとLINEアプリ。ソースツールが無ければ、そのソースだけを無効化する。
+- 対象範囲の各ソース種別について、そのツールが使える: Slackには読み取り用のコネクタ（Slackの `reply.mode: send` があるなら、送信用にClaude in Chromeも）、LINEにはComputer UseとLINEアプリ。Claude in Chromeが使えなければ、Slackの返信だけを `draft` として扱う。ソースツールが無ければ、そのソースだけを無効化する。
 - `merge.mode: auto` のリポジトリでは、1件のreadyなPRに対する `sirius-merge check` が判定を評価できることを確認する。できなければ、この実行ではそのリポジトリを `manual` として扱い、理由を報告する。
 
 最初の外部書き込みの前に、計画を台帳へ書く。オブジェクトを変更する直前に必ず取り直す。
