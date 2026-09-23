@@ -1,10 +1,10 @@
 # Sirius
 
-Slack や LINE で来た依頼を GitHub Issue にし、別のモデルのレビューを通した PR にして、プロジェクトごとの設定に従ってマージまで進める Claude Code プラグインです。
+Slack や LINE で来た依頼を GitHub Issue にし、別のモデルのレビューを通した PR にして、リポジトリごとの設定に従ってマージまで進める Claude Code プラグインです。
 
 ```
 Slack / LINE ─▶ Issue ─▶ 実装（ドラフト PR）─▶ 独立レビュー ─▶ ready PR ─▶ マージ
-                         ▲ implement_gate                                  ▲ merge
+                         ▲ implement.gate                                 ▲ merge.mode
 ```
 
 ## インストール
@@ -14,7 +14,7 @@ Slack / LINE ─▶ Issue ─▶ 実装（ドラフト PR）─▶ 独立レビ�
 /plugin install sirius@sirius
 ```
 
-プロジェクトのディレクトリで次を実行します。
+リポジトリのディレクトリで次を実行します。
 
 ```text
 /sirius:setup
@@ -24,7 +24,7 @@ Slack / LINE ─▶ Issue ─▶ 実装（ドラフト PR）─▶ 独立レビ�
 
 | コマンド | 役割 |
 |---|---|
-| `/sirius:setup` | 全体設定と、このディレクトリのプロジェクトを登録する。あなたにしかできない作業のチェックリストも出す |
+| `/sirius:setup` | 全体設定と、このディレクトリのリポジトリを登録する。あなたにしかできない作業のチェックリストも出す |
 | `/sirius:run` | 1サイクル実行する（マージ → 確認待ちの再開 → Slack/LINE の取り込み → 実装） |
 | `/sirius:status` | 読み取り専用で状況を表示する。あなた待ちのものを最後にまとめる |
 | `/sirius:stop` | 直ちに止める（`~/.sirius/STOP` を作る）。`/sirius:stop resume` で再開 |
@@ -33,50 +33,55 @@ Slack / LINE ─▶ Issue ─▶ 実装（ドラフト PR）─▶ 独立レビ�
 
 ```
 ~/.sirius/
-  config.yaml            全体: 実装役とレビュー役、上限、スケジューラ、レビュー用アカウント
-  projects/<name>.yaml   プロジェクトごと: dir、repos、sources、implement_gate、merge、merge_rules
-  state/ runs/ locks/    実行状態
-  STOP                   あれば全停止
+  config.yaml                       全体: 実装役とレビュー役、上限、スケジューラ、レビュー用アカウント
+  repos/<owner>__<repo>.yaml        リポジトリごと: dir、sources、reply、investigate、
+                                     implement、review、verify、merge、forbidden
+  state/ runs/ locks/                実行状態
+  STOP                               あれば全停止
 ```
 
-プロジェクトのリポジトリ（`.claude/` を含む）には何も置きません。これは次の2つの理由からです。
+設定の単位は「プロジェクト」ではなくリポジトリ1つです。調査の仕方、レビューの仕方、検証の仕方はリポジトリごとに決まるものであり、抽象的な「プロジェクト」単位では決まらないためです。1ファイルにつきリポジトリは1つで、ファイル名は `owner/repo` を小文字化して `/` を `__` に置き換えたもの（例: `acme/my-repo` → `acme__my-repo.yaml`）になります。
+
+対象リポジトリ（`.claude/` を含む）には何も置きません。これは次の2つの理由からです。
 
 - `.claude/` 配下を自由に編集できないチームでも使えるようにするため。
 - エージェントが自分の PR で自分のゲートを緩める経路を作らないため。
 
 ひな形は [templates/](templates/) にあります。
 
-### 2つのゲート
+### 3つのゲート
 
 | 設定 | 値 | 意味 |
 |---|---|---|
-| `implement_gate` | `human` | 人が Issue のタイトル先頭に `[implement]` を付けたら実装する |
+| `implement.gate` | `human` | 人が Issue のタイトル先頭に `[implement]` を付けたら実装する |
 | | `auto` | 受入条件がはっきりした Issue なら、Sirius が作るときに `[implement]` を付けて実装する |
-| `merge` | `manual` | PR を ready にして知らせる。人がタイトル先頭に `[merge]` を付けたら Sirius がマージする |
+| `merge.mode` | `manual` | PR を ready にして知らせる。人がタイトル先頭に `[merge]` を付けたら Sirius がマージする |
 | | `auto` | 下の条件がすべてそろったら、Sirius が `[merge]` を付けてマージする |
+| `reply.mode` | `draft` | 送信せず、提案する返信文を Issue やレポートに書くだけ |
+| | `send` | 実際に返信する（Slackのみ。LINEには送信経路がなく、常に `draft` 相当で動く） |
 
 ラベルは使いません。状態は、タイトル先頭の `[implement]` / `[merge]`、Issue の目印コメント（`working` / `waiting` / `blocked` / `ready`）、PR が draft か ready かで表します。`[merge]` を付けた後に新しいコミットが入った PR はマージしないので、見直してから付け直してください。
 
-全体の `config.yaml` の値が上限です。プロジェクト側で緩くすることはできません。条件が足りないときは、`sirius-config` が自動で `manual` に落とし、その理由を `downgrades` に表示します。
+全体の `config.yaml` の値が上限です。リポジトリ側で緩くすることはできません（`reply.mode` も含めて3つとも同じ仕組みです）。条件が足りないときは、`sirius-config` が自動でより厳しい側に落とし、その理由を `downgrades` に表示します。
 
-### `merge: auto` の条件
+### `merge.mode: auto` の条件
 
-- 実装とレビューが別のモデルであること（`implementer` と `reviewer`）
+- 実装とレビューが別のモデルであること（`implementer` と `reviewer`。リポジトリの `review.reviewer` があればそちらを優先）
 - レビュー専用の別 GitHub アカウント（`identities.reviewer`）が、今の head に対して判定を投稿し、Approve していること
 - head が base の先端に載っていて、衝突がないこと
 - CI がすべて成功していること
-- 人が押すべきブランチ、ラベル、パスに当たらないこと
+- 人が押すべきブランチ、パスに当たらないこと
 - `STOP` がないこと
 
 加えて、リポジトリのルールセットで「今の push への承認1件」を必須にしてください。そうすれば、エージェントがこの仕組みを通らずにマージしようとしても GitHub が止めます。
 
-## 既知の限界（v0.1）
+## 既知の限界（v0.1 から変わらず）
 
 レビュー用アカウントの資格情報は、エージェントと同じマシンの `~/.sirius/identities/reviewer` にあります。そのため、手順を守らないエージェントは `sirius-merge verdict` に虚偽の検証結果を渡し、レビュー用アカウントとして承認を投稿できてしまいます。
 
 「別アカウントでなければ承認できない」ことは GitHub が保証します。しかし「本当に別のモデルが検証した」ことは、プロセスが同じ権限で動いている限り証明できません。
 
-これを塞ぐには、レビューを GitHub Actions 側で実行し、レビュー用のトークンを Actions のシークレットにだけ置く必要があります。そうすれば、ローカルのエージェントはレビュー用の資格情報を持ちません。この構成は次の版の課題です。それまでは、失うと困るリポジトリで `merge: auto` を使わないでください。
+これを塞ぐには、レビューを GitHub Actions 側で実行し、レビュー用のトークンを Actions のシークレットにだけ置く必要があります。そうすれば、ローカルのエージェントはレビュー用の資格情報を持ちません。この構成は今後の課題です。それまでは、失うと困るリポジトリで `merge.mode: auto` を使わないでください。
 
 ## 安全の層
 
@@ -86,6 +91,12 @@ Slack / LINE ─▶ Issue ─▶ 実装（ドラフト PR）─▶ 独立レビ�
 
 プラグインは `permissions.deny` を同梱できないため、`/sirius:setup` が追加すべき設定を提示します。
 
+## 並行実行とリース
+
+`~/.sirius/locks/` の下に、スコープごとに独立したロックファイルを持ちます。独立したリポジトリの作業（マージ・実装）は、`--scope repo:<owner/repo>` のリースを取って並行に進められます。LINE の取り込みだけは、ネイティブ macOS LINE アプリを操作する Computer Use セッションが機械に1つしかないため、`--scope line` の専用リースで機械全体を通して直列化します。マシン全体を1本でロックする「実行全体のリース」はもうありません。
+
+ロックはマシン単位です。同じキューをクラウドのルーチンと併用しないでください。
+
 ## 定期実行
 
 `config.yaml` の `scheduler` で1つだけ選びます。
@@ -93,16 +104,23 @@ Slack / LINE ─▶ Issue ─▶ 実装（ドラフト PR）─▶ 独立レビ�
 - `loop`: 開いているセッションで `/loop 10m /sirius:run`
 - `launchd`: `/sirius:setup` が `~/.sirius/bin/sirius-tick` と plist を用意する。`StartInterval` で起動し、`KeepAlive` は使わない。`blocked` や `failed` で終わると macOS の通知が届く。
 
-ロックはマシン単位です。同じキューをクラウドのルーチンと併用しないでください。
-
 ## 旧 Sirius からの移行
+
+さらに古い Sirius（Markdown 台帳）からの一回限りの移行:
 
 ```bash
 scripts/migrate-legacy          # 変換結果を表示するだけ
-scripts/migrate-legacy --write  # ~/.sirius/projects/*.yaml と config.yaml を作る
+scripts/migrate-legacy --write  # 当時の ~/.sirius/projects/*.yaml と config.yaml を作る
 ```
 
-移行したファイルには `needs_review: true` が付き、確認が済むまでは `human` / `manual` で動きます。
+v0.2（`projects/<name>.yaml`、1プロジェクトに複数リポジトリ）から現行の v0.3（`repos/<owner>__<repo>.yaml`、1ファイル1リポジトリ）への一回限りの移行:
+
+```bash
+scripts/migrate-projects-to-repos          # 変換結果を表示するだけ
+scripts/migrate-projects-to-repos --write  # ~/.sirius/repos/<owner>__<repo>.yaml を作る
+```
+
+どちらの移行でも、生成したファイルには `needs_review: true` が付き、確認が済むまでは `human` / `manual` / `draft` で動きます。
 
 ## 開発
 

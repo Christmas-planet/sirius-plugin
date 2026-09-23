@@ -1,51 +1,51 @@
-# ~/.sirius/repos/<owner>__<repo>.yaml — one file per GitHub repository. Edited by the operator.
-# The file name must be the repo lowercased with "/" replaced by "__",
-# e.g. repo "acme/my-repo" -> acme__my-repo.yaml
-repo: acme/my-repo               # exact owner/repo; a repo belongs to one file only
-dir: ~/projects/acme/my-repo     # optional local checkout; used to find the repo from the current directory
+# ~/.sirius/repos/<owner>__<repo>.yaml — GitHubリポジトリ1つにつき1ファイル。オペレーターが編集する。
+# ファイル名は、リポジトリを小文字化して "/" を "__" に置き換えたものにする。
+# 例: repo "acme/my-repo" -> acme__my-repo.yaml
+repo: acme/my-repo               # 正確な owner/repo。1つのリポジトリは1ファイルにしか属さない
+dir: ~/projects/acme/my-repo     # 任意。ローカルのチェックアウト。カレントディレクトリからこのリポジトリを見つけるのに使う
 
 sources:
   slack:
-    - {workspace: T0123456789, channel: C0123456789}   # exact IDs, no names or wildcards
+    - {workspace: T0123456789, channel: C0123456789}   # 正確なID。名前やワイルドカードは不可
   line:
-    - {chat: "Exact chat title"}                         # native macOS LINE app only
+    - {chat: "正確なチャット名"}                          # ネイティブのmacOS LINEアプリのみ
 
-reply:                       # how Sirius replies to the person who asked, in Slack/LINE
-  mode: draft                # draft: never send, write the proposed text into the Issue/report instead
-                              # send: actually send it (Slack: slack_send_message; LINE has no send path)
-  style: ""                  # optional free text, e.g. "write-like-kazuki"
-  never: []                  # free text list of things never to say or promise
+reply:                       # Slack/LINEで、依頼してきた人へどう返信するか
+  mode: draft                # draft: 送信せず、提案する返信文をIssue/レポートに書くだけ
+                              # send: 実際に送信する（Slackはslack_send_message；LINEには送信経路がない）
+  style: ""                  # 任意の自由記述。例: "write-like-kazuki"
+  never: []                  # 絶対に言ってはいけない・約束してはいけないことの自由記述リスト
 
-investigate:                 # prose the implementing/reviewing model reads and follows
-  read_first: []              # paths inside the repo to read before working, e.g. [CLAUDE.md, docs/]
-  knowledge: []               # info OUTSIDE the repo the model should know, e.g.
-                               #   - {where: "LINE chat with the owner", what: "design preferences"}
-  ask_user_when: []           # free text list of situations that need the user's input, not a guess
+investigate:                 # 実装役・レビュー役のモデルが読んで従うべき自由記述
+  read_first: []              # 作業前にリポジトリ内で読むべきパス。例: [CLAUDE.md, docs/]
+  knowledge: []               # リポジトリの外にある、モデルが知っておくべき情報。例:
+                               #   - {where: "オーナーとのLINEチャット", what: "デザインの好み"}
+  ask_user_when: []           # 推測せずユーザーの判断が必要な状況の自由記述リスト
 
 implement:
-  gate: human                 # human: a person adds `[implement]`; auto: Sirius adds it for clear Issues
-  conventions: []             # optional free text list, e.g. PR body format, commit rules
+  gate: human                 # human: 人が `[implement]` を付ける; auto: 明確なIssueにSiriusが付ける
+  conventions: []             # 任意の自由記述リスト。例: PR本文の書式、コミットのルール
 
 review:
-  reviewer: ""                # claude | codex; optional, falls back to config.yaml's global reviewer
-  focus: []                   # optional free text list of what the reviewer should pay attention to
+  reviewer: ""                # claude | codex。任意。空ならconfig.yamlのグローバルなreviewerを使う
+  focus: []                   # 任意の自由記述リスト。レビュワーが特に注意すべき点
 
 verify:
-  commands: []                 # optional shell commands to run as part of verification
-  live: []                     # optional prose, e.g. [{how: "iOS simulator", evidence: "screenshot"}]
-  not_enough: []               # optional free text list, e.g. ["a build log alone is not display proof"]
+  commands: []                 # 検証の一環として実行する任意のシェルコマンド
+  live: []                     # 任意の自由記述。例: [{how: "iOSシミュレータ", evidence: "スクリーンショット"}]
+  not_enough: []               # 任意の自由記述リスト。例: ["ビルドログだけでは画面表示の証拠にならない"]
 
 merge:
-  mode: manual                 # manual: a person merges; auto: sirius-merge merges when every check passes
+  mode: manual                 # manual: 人がマージする; auto: すべてのチェックが通ればsirius-mergeがマージする
   ci_required: true
-  approvals: 0                 # human approvals needed in addition to the reviewer account
-  human_branches: {}           # e.g. {main: "deploys to production"} or {"*": "reason"}
-  deploys: {}                  # e.g. {main: "Vercel production"}
-  deploy_workflows: {}         # e.g. {main: "Deploy"}; this Actions workflow is watched and a failure opens a revert PR.
-                                # Without it the deploy is reported as unverified.
+  approvals: 0                 # レビュー用アカウントに加えて必要な人の承認数
+  human_branches: {}           # 例: {main: "本番へデプロイされる"} または {"*": "理由"}
+  deploys: {}                  # 例: {main: "Vercel本番環境"}
+  deploy_workflows: {}         # 例: {main: "Deploy"}；このActionsワークフローを監視し、失敗したらrevert PRを開く。
+                                # 指定しないと、デプロイは未検証として報告される。
 
-forbidden: []                  # free text list of things the model must never do in this repo
+forbidden: []                  # このリポジトリでモデルが絶対にしてはいけないことの自由記述リスト
 
-needs_review: false             # unchanged semantics: true forces human/manual/draft until the operator clears it
+needs_review: false             # 従来と同じ意味: trueだとオペレーターが外すまでhuman/manual/draftに固定される
 notes: |
-  Anything the agents should know about this repo.
+  エージェントがこのリポジトリについて知っておくべきこと。

@@ -1,8 +1,8 @@
 {
   "name": "sirius",
   "displayName": "Sirius",
-  "version": "0.2.0",
-  "description": "Turn Slack and LINE requests into GitHub Issues, implement them as reviewed PRs, and merge under per-project gates configured in ~/.sirius.",
+  "version": "0.3.0",
+  "description": "Turn Slack and LINE requests into GitHub Issues, implement them as reviewed PRs, and merge under per-repo gates configured in ~/.sirius.",
   "author": { "name": "Kazuki Izutani", "email": "contact@mezame.ai" },
   "repository": "https://github.com/Christmas-planet/sirius-plugin",
   "license": "UNLICENSED",

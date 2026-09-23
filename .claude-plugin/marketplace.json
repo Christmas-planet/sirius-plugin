@@ -6,8 +6,8 @@
     {
       "name": "sirius",
       "source": "./",
-      "description": "Slack/LINE → GitHub Issue → reviewed PR → gated merge, configured per project in ~/.sirius.",
-      "version": "0.2.0"
+      "description": "Slack/LINE → GitHub Issue → reviewed PR → gated merge, configured per repo in ~/.sirius.",
+      "version": "0.3.0"
     }
   ]
 }

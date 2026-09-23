@@ -1,26 +1,27 @@
-# ~/.sirius/config.yaml — Sirius global settings. Edited by the operator.
+# ~/.sirius/config.yaml — Siriusのグローバル設定。オペレーターが編集する。
 version: 1
 
-# Who writes the code and who reviews it (claude | codex).
-# merge: auto requires them to differ.
+# 誰がコードを書き、誰がレビューするか（claude | codex）。
+# merge: auto にはこの2つが異なっていることが必要。
 implementer: claude
 reviewer: codex
 
-# Ceilings. A project can be stricter, never looser.
+# 上限。個々のリポジトリはこれより厳しくできるが、緩くはできない。
 implement_gate: human   # human | auto
 merge: manual           # manual | auto
+reply: {mode: draft}    # draft | send
 
-# none | loop | launchd. Use one scheduler per queue; the lease is per machine.
+# none | loop | launchd。1つのキューにつきスケジューラは1つ。リースは機械単位。
 scheduler: none
 
-# In merge: auto, a PR touching one of these paths waits for a person to add [merge].
+# merge: auto のとき、これらのパスに触れるPRは人が [merge] を付けるのを待つ。
 human_paths: [.github/workflows/]
 
 limits:
   new_issues_per_source: 5
   concurrent_workers: 2
 
-# Required for merge: auto. A separate GitHub account that posts verdicts and approvals.
+# merge: auto に必須。判定と承認を投稿する、別のGitHubアカウント。
 identities: {}
 #  reviewer:
 #    login: my-review-bot
