@@ -2,8 +2,8 @@
 """PreToolUse guard for Sirius. A supplementary layer only.
 
 A hook does not block when it times out, and it cannot see the GitHub API called
-from another process. The real merge gate is the repository ruleset plus the
-separate reviewer account checked by sirius-merge. This hook catches the common
+from another process. The real merge gate is sirius-merge's own check of an
+independent reviewer model's verdict, CI, and base. This hook catches the common
 direct paths so a mistake fails loudly.
 
 Exit 2 blocks the tool call and shows stderr to Claude. Writes to the gate
