@@ -1,6 +1,6 @@
 ---
 name: intake-slack
-description: ~/.sirius/repos/*.yamlに列挙されたSlackチャンネルを凍結された時間窓だけ読み、未解決の依頼をcreate-issue経由で重複排除しつつGitHub Issueにする。Sirius runスキルから呼ばれるほか、1つのリポジトリ向けに単独でも使える。
+description: ~/.sirius/repos/*.yamlに列挙されたSlackチャンネルを凍結された時間窓だけ読み、未解決の依頼をcreate-issue経由で重複排除しつつGitHub Issueにし、reply.modeに従って依頼者へ自然な返信を下書きまたは送信する。Sirius runスキルから呼ばれるほか、1つのリポジトリ向けに単独でも使える。
 user-invocable: false
 ---
 

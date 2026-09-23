@@ -1,6 +1,6 @@
 ---
 name: intake-line
-description: ~/.sirius/repos/*.yamlに列挙されたLINEチャットを、ネイティブのmacOS LINEアプリで凍結された時間窓だけ読み、未解決の依頼をcreate-issue経由で重複排除しつつGitHub Issueにする。Sirius runスキルから呼ばれ、Computer Useのあるローカルセッションが必要。
+description: ~/.sirius/repos/*.yamlに列挙されたLINEチャットを、ネイティブのmacOS LINEアプリで凍結された時間窓だけ読み、未解決の依頼をcreate-issue経由で重複排除しつつGitHub Issueにし、reply.modeに従って依頼者へ自然な返信を下書きまたは送信する。Sirius runスキルから呼ばれ、Computer Useのあるローカルセッションが必要。
 user-invocable: false
 ---
 
