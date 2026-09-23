@@ -1,0 +1,174 @@
+#!/usr/bin/env python3
+"""One-shot migration from ~/.sirius/projects/<name>.yaml (v0.2 schema, one
+project with many repos) to ~/.sirius/repos/<owner>__<repo>.yaml (v0.3
+schema, one file per GitHub repository).
+
+For each repo listed in a project file, this writes one repos/<file>.yaml
+with the mechanical fields mapped over:
+
+  repo             <- the repo string
+  dir              <- the project's dir, but only when it actually resolves
+                       to *this* repo's own checkout (samefile against a
+                       ~/projects/<owner>/<name> guess); a project's dir is
+                       not assumed to apply to every repo it lists
+  sources           <- the project's sources, copied as-is (flagged in the
+                       report when a project lists more than one repo, since
+                       the same source ends up on every repo file)
+  implement.gate    <- the project's implement_gate
+  merge.mode        <- the project's merge
+  merge.*           <- the project's merge_rules[repo], if present
+
+investigate, review, verify, reply, and forbidden are left at empty/minimal
+defaults -- this script does not invent prose. needs_review is always kept
+true, so every migrated repo stays on the human/manual/draft ceiling until
+the operator reviews it.
+
+A project with an empty `repos: []` list cannot become a repo file (there is
+no repo to key the file name on). It is skipped and reported, not silently
+dropped -- see the final report for what to do with it by hand.
+
+Usage: migrate-projects-to-repos [--write]   (dry run by default)
+"""
+
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+HOME = Path(os.environ.get("SIRIUS_HOME", Path.home() / ".sirius"))
+
+
+def load_yaml(path):
+    text = path.read_text(encoding="utf-8")
+    try:
+        import yaml  # type: ignore
+        return yaml.safe_load(text) or {}
+    except ImportError:
+        pass
+    out = subprocess.run(
+        ["ruby", "-ryaml", "-rjson", "-e",
+         "puts JSON.generate(YAML.safe_load(STDIN.read) || {})"],
+        input=text, capture_output=True, text=True, check=True,
+    ).stdout
+    return json.loads(out)
+
+
+def yaml_dump(obj):
+    try:
+        import yaml  # type: ignore
+        return yaml.safe_dump(obj, allow_unicode=True, sort_keys=False, width=100)
+    except ImportError:
+        pass
+    # Hand-edited production files deserve real YAML, not a JSON fallback:
+    # use Ruby Psych to dump, not just to parse.
+    out = subprocess.run(
+        ["ruby", "-ryaml", "-rjson", "-e", "puts YAML.dump(JSON.parse(STDIN.read))"],
+        input=json.dumps(obj), capture_output=True, text=True, check=True,
+    ).stdout
+    return out if out.endswith("\n") else out + "\n"
+
+
+def repo_file_name(repo):
+    return repo.lower().replace("/", "__") + ".yaml"
+
+
+def local_dir(repo, project_dir):
+    """A repo's own checkout dir, if it can be confirmed.
+
+    Only trusts the project's `dir` for this repo when it resolves (by
+    samefile, case-insensitive) to a guessed ~/projects/<owner>/<name>
+    checkout for this exact repo. A project dir that turns out to belong to
+    a *different* repo in the same project is not copied onto this one.
+    """
+    owner, name = repo.split("/")
+    guesses = [Path.home() / "projects" / owner / name,
+               Path.home() / "projects" / owner.lower() / name,
+               Path.home() / "projects" / name]
+    if project_dir:
+        pd = Path(os.path.expanduser(project_dir))
+        if pd.exists():
+            for g in guesses:
+                if g.exists() and g.samefile(pd):
+                    return "~/" + str(pd.relative_to(Path.home()))
+    for g in guesses:
+        if (g / ".git").exists():
+            return "~/" + str(g.relative_to(Path.home()))
+    return None
+
+
+def convert_repo(repo, project):
+    merge_rules = (project.get("merge_rules") or {}).get(repo) or {}
+    merge = {"mode": project.get("merge", "manual")}
+    merge.update(merge_rules)
+    return {
+        "repo": repo,
+        "dir": local_dir(repo, project.get("dir")),
+        "sources": project.get("sources") or {"slack": [], "line": []},
+        "reply": {"mode": "draft", "style": "", "never": []},
+        "investigate": {"read_first": [], "knowledge": [], "ask_user_when": []},
+        "implement": {"gate": project.get("implement_gate", "human"), "conventions": []},
+        "review": {"reviewer": "", "focus": []},
+        "verify": {"commands": [], "live": [], "not_enough": []},
+        "merge": merge,
+        "forbidden": [],
+        "needs_review": True,
+        "notes": (f"移行元: ~/.sirius/projects/{project['name']}.yaml（project-per-repo廃止に伴う機械移行。"
+                  "investigate/review/verify/reply/forbidden は空のまま。旧 notes:\n"
+                  + (project.get("notes") or "") + ")"),
+    }
+
+
+def main():
+    write = "--write" in sys.argv
+    src_dir = HOME / "projects"
+    out_dir = HOME / "repos"
+    if not src_dir.exists():
+        print(f"{src_dir} not found; nothing to migrate")
+        return 0
+
+    multi_repo_source_warnings = []
+    skipped_no_repo = []
+    written = []
+
+    for path in sorted(src_dir.glob("*.yaml")):
+        project = load_yaml(path)
+        if not isinstance(project, dict):
+            print(f"skip {path}: not a mapping")
+            continue
+        repos = project.get("repos") or []
+        if not repos:
+            skipped_no_repo.append(project.get("name", path.stem))
+            continue
+        has_sources = bool((project.get("sources") or {}).get("slack")) or \
+            bool((project.get("sources") or {}).get("line"))
+        if len(repos) > 1 and has_sources:
+            multi_repo_source_warnings.append((project.get("name", path.stem), repos))
+        for repo in repos:
+            target = out_dir / repo_file_name(repo)
+            if target.exists():
+                print(f"skip {target} (exists)")
+                continue
+            body = yaml_dump(convert_repo(repo, project))
+            if write:
+                out_dir.mkdir(parents=True, exist_ok=True)
+                target.write_text(body, encoding="utf-8")
+                print(f"wrote {target}")
+            else:
+                print(f"--- {target}\n{body}")
+            written.append(str(target))
+
+    print()
+    print("=== report ===")
+    if skipped_no_repo:
+        print(f"projects with no repo (left unmigrated, need a human decision): {', '.join(skipped_no_repo)}")
+    for name, repos in multi_repo_source_warnings:
+        print(f"{name}: {len(repos)} repos share the same sources; "
+              f"each repo file below got a copy -- check for duplicate-Issue risk: {', '.join(repos)}")
+    if not write:
+        print("dry run; pass --write to create files")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
