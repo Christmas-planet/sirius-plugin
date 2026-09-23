@@ -73,6 +73,8 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.sirius.tick.plist
 
 tickは `~/.sirius` から `claude -p "/sirius:run"` を実行するので、プラグインはユーザースコープで有効になっている必要がある（`/plugin install sirius@sirius --scope user`）。プロジェクト設定だけで有効にしていると、スケジュール実行から `/sirius:run` が見えない。tickは `ANTHROPIC_BASE_URL` とモデル上書き用の環境変数を取り除き、`--model opus --effort high` で実行する（`SIRIUS_MODEL` / `SIRIUS_EFFORT` で上書き、`SIRIUS_TICK_KEEP_ENV=1` で環境をそのまま保持）。
 
+Slackの返信を `send` にしているなら、tickはClaude in Chromeを使う（`--chrome` 付きで起動する）。無人の `claude -p` からChromeを使うには、`~/.claude/settings.json` の `permissions.allow` に `mcp__claude-in-chrome__*` を入れ、さらにユーザーが一度、対話の `claude --chrome` でClaude in Chromeの使用を承認しておく必要がある。承認されていないと、tickのSlack返信は「Claude in Chrome requires permission」で送れず、下書きとしてレポートに残るだけになる。確認は `cd ~/.sirius && claude -p --chrome "tabs_context_mcpを呼んで接続できるか答えて"`。
+
 ジョブは `KeepAlive` なしの `StartInterval` を使うので、クラッシュが再起動ループを招かない。止めるには: `launchctl bootout gui/$(id -u)/ai.sirius.tick`。
 
 ## 4. 仕上げ
