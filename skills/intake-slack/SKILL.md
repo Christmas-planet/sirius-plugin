@@ -40,7 +40,7 @@ Slackは読み取り専用のまま扱う: リアクション、編集、既読�
 Slackへの書き込み（送信、下書き、予約送信）はMCPのSlackツール（`slack_send_message`、`slack_send_message_draft`、`slack_schedule_message` など）では絶対に行わない。オペレーターが禁止している。書き込みは必ずClaude in Chrome（`mcp__claude-in-chrome__*`）でSlackのWebアプリを操作して行う。読み取りはMCPのSlackツールでよい。
 
 - `draft`: 送らない。文面をIssueかこの実行のレポートに書く。
-- `send`: Claude in Chromeで次の順に送る。
+- `send`: Claude in Chromeで次の順に送る。無人の実行（`claude -p --chrome`）では最初に `tabs_context_mcp` を `createIfEmpty: true` で呼び、このセッション用のタブグループを作ってから操作する（作らないと「No tab group exists for this session」が返る）。
   1. `https://app.slack.com/client/<workspace>/<channel>/thread/<channel>-<thread_ts>` を開き、凍結済みの表にある正確なワークスペースとチャンネルの、そのスレッドが表示されていることを画面で確かめる（チャンネル名、親メッセージの送信者と時刻）。ログインを求められたら送らず、`draft` と同じ扱いにしてレポートに書く。
   2. スレッドの返信欄（チャンネルへの投稿欄ではない）に文面を入力する。「チャンネルにも投稿する」にはチェックを入れない。メンションはSlackの候補から選んで確定し、正しい相手になっていることを確かめる。
   3. 送信前に入力欄の内容を読み取り、最終文面と一致することを確かめてから送る。
