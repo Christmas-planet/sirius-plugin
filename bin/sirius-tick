@@ -19,7 +19,15 @@ notify() {
 
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 out="$LOG_DIR/$stamp.json"
-(cd "$SIRIUS_HOME" && "$CLAUDE_BIN" -p "/sirius:run" \
+# A login shell can carry a proxy base URL or model overrides meant for other tools.
+# Drop them so the run reaches Anthropic with the model chosen here.
+# SIRIUS_TICK_KEEP_ENV=1 keeps the environment as it is.
+scrub=(/usr/bin/env -u ANTHROPIC_BASE_URL -u ANTHROPIC_MODEL -u ANTHROPIC_DEFAULT_HAIKU_MODEL
+       -u ANTHROPIC_DEFAULT_SONNET_MODEL -u ANTHROPIC_DEFAULT_OPUS_MODEL)
+[[ "${SIRIUS_TICK_KEEP_ENV:-0}" == 1 ]] && scrub=()
+
+(cd "$SIRIUS_HOME" && "${scrub[@]}" "$CLAUDE_BIN" -p "/sirius:run" \
+   --model "${SIRIUS_MODEL:-opus}" --effort "${SIRIUS_EFFORT:-high}" \
    --permission-mode auto --output-format json) >"$out" 2>&1
 code=$?
 

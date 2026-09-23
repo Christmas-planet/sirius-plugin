@@ -71,6 +71,8 @@ cp <plist> ~/Library/LaunchAgents/ai.sirius.tick.plist
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.sirius.tick.plist
 ```
 
+The tick runs `claude -p "/sirius:run"` from `~/.sirius`, so the plugin must be enabled at user scope (`/plugin install sirius@sirius --scope user`). If it is enabled only in project settings, the scheduled run cannot see `/sirius:run`. The tick removes `ANTHROPIC_BASE_URL` and model-override variables and runs with `--model opus --effort high` (override with `SIRIUS_MODEL` / `SIRIUS_EFFORT`, or keep the environment with `SIRIUS_TICK_KEEP_ENV=1`).
+
 The job uses `StartInterval` without `KeepAlive`, so a crash does not cause a restart loop. To stop it: `launchctl bootout gui/$(id -u)/ai.sirius.tick`.
 
 ## 5. Finish
