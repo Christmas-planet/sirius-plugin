@@ -19,9 +19,7 @@ with the mechanical fields mapped over:
   merge.*           <- the project's merge_rules[repo], if present
 
 investigate, review, verify, reply, and forbidden are left at empty/minimal
-defaults -- this script does not invent prose. needs_review is always kept
-true, so every migrated repo stays on the human/manual/draft ceiling until
-the operator reviews it.
+defaults -- this script does not invent prose.
 
 A project with an empty `repos: []` list cannot become a repo file (there is
 no repo to key the file name on). It is skipped and reported, not silently
@@ -112,7 +110,6 @@ def convert_repo(repo, project):
         "verify": {"commands": [], "live": [], "not_enough": []},
         "merge": merge,
         "forbidden": [],
-        "needs_review": True,
         "notes": (f"移行元: ~/.sirius/projects/{project['name']}.yaml（project-per-repo廃止に伴う機械移行。"
                   "investigate/review/verify/reply/forbidden は空のまま。旧 notes:\n"
                   + (project.get("notes") or "") + ")"),

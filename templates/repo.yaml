@@ -46,6 +46,5 @@ merge:
 
 forbidden: []                  # このリポジトリでモデルが絶対にしてはいけないことの自由記述リスト
 
-needs_review: false             # 従来と同じ意味: trueだとオペレーターが外すまでhuman/manual/draftに固定される
 notes: |
   エージェントがこのリポジトリについて知っておくべきこと。

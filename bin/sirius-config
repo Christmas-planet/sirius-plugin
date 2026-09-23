@@ -48,7 +48,7 @@ GLOBAL_DEFAULTS = {
 
 REPO_KEYS = {
     "repo", "dir", "sources", "reply", "investigate", "implement", "review",
-    "verify", "merge", "forbidden", "needs_review", "notes",
+    "verify", "merge", "forbidden", "notes",
 }
 SOURCE_KINDS = {"slack", "line"}
 RULE_KEYS = {"ci_required", "approvals", "human_branches", "deploys", "deploy_workflows"}
@@ -253,8 +253,6 @@ def validate_repo(path, data):
     errors.extend(validate_merge(path, data.get("merge") or {}))
     errors.extend(_str_list_errors(path, "forbidden", data.get("forbidden")))
 
-    if "needs_review" in data and not isinstance(data["needs_review"], bool):
-        errors.append(f"{path}: needs_review must be true or false")
     if "notes" in data and not isinstance(data["notes"], str):
         errors.append(f"{path}: notes must be a string")
     if "dir" in data and data["dir"] is not None and not isinstance(data["dir"], str):
@@ -287,12 +285,6 @@ def resolve(glob, path, data):
     reply_mode = stricter(REPLY_MODES, glob["reply"]["mode"], declared_reply)
     if reply_mode != declared_reply:
         notes.append(f"reply capped at {reply_mode!r} by config.yaml")
-
-    if data.get("needs_review"):
-        gate = "human"
-        merge_mode = "manual"
-        reply_mode = "draft"
-        notes.append("needs_review is set; human gate until the operator clears it")
 
     merge_block = {"mode": merge_mode}
     for key in RULE_KEYS:
@@ -342,7 +334,6 @@ def resolve(glob, path, data):
         },
         "merge": merge_block,
         "forbidden": data.get("forbidden") or [],
-        "needs_review": bool(data.get("needs_review")),
         "notes": data.get("notes") or "",
         "downgrades": notes,
     }

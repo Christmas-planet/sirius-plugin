@@ -112,8 +112,6 @@ scripts/migrate-projects-to-repos          # 変換結果を表示するだけ
 scripts/migrate-projects-to-repos --write  # ~/.sirius/repos/<owner>__<repo>.yaml を作る
 ```
 
-どちらの移行でも、生成したファイルには `needs_review: true` が付き、確認が済むまでは `human` / `manual` / `draft` で動きます。
-
 ## 開発
 
 ```bash

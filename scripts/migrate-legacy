@@ -3,8 +3,7 @@
 
 Reads only the `## 定義` section of each ~/.sirius/projects/<name>.md and the
 matching repositories in ~/.sirius/merge-policy.json. Legacy files are left in
-place. Every generated project gets `needs_review: true`, which forces the human
-gate until the operator checks the file and removes the flag.
+place.
 
 Usage: migrate-legacy [--write]   (dry run by default)
 """
@@ -85,7 +84,6 @@ def convert(md_path, policy):
         "notes": ("移行元の定義（完全一致のIDだけ自動抽出済み。LINE会話名、"
                   "ワークスペースIDのないSlack、ワイルドカード指定は手で確認して追記する）:\n"
                   + definition),
-        "needs_review": True,
     }
     if not repos:
         project["merge"] = "manual"

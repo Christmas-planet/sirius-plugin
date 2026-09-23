@@ -33,8 +33,6 @@ disable-model-invocation: true
 4. [テンプレート](../../templates/repo.yaml)から `~/.sirius/repos/<owner>__<repo>.yaml`（`owner/repo` を小文字化し `/` を `__` に置き換えたファイル名）を書き、`dir` を現在のディレクトリに設定する。
 5. `sirius-config validate` を実行し、`downgrades` を含めて実効結果を見せる。
 
-旧Siriusから移行したリポジトリのファイルには `needs_review: true` が付いている。これは、ユーザーがファイルを確認してこのフラグを外すまで、`human` / `manual` / `draft` に留める。ファイルを一緒に見ながら確認する。自分の判断でフラグを外さない。
-
 Siriusはラベルを作らない。状態はタイトル接頭辞の `[implement]` / `[merge]`、Issueのmarkerコメント、PRのdraft/ready状態にある。
 
 ## 3. オペレーターのチェックリスト

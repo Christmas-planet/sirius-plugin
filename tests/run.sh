@@ -29,14 +29,8 @@ check "repo review.reviewer overriding the global reviewer is checked against th
   sed "s#repo: acme/my-repo#repo: acme/samereviewer#; s/^  reviewer: \"\"/  reviewer: claude/; s/^  mode: manual/  mode: auto/" templates/repo.yaml > "$SIRIUS_HOME/repos/acme__samereviewer.yaml"
   bin/sirius-config repo acme/samereviewer | grep -q "different from the implementer"'
 rm -f "$SIRIUS_HOME/repos/acme__samereviewer.yaml"
-check "needs_review forces human gate, manual merge, and draft reply" '
-  sed -i "" "s/^needs_review: false/needs_review: true/" "$SIRIUS_HOME/repos/acme__my-repo.yaml"
-  out=$(bin/sirius-config repo acme/my-repo)
-  [[ $(print -r -- "$out" | jget implement.gate) == human ]] &&
-  [[ $(print -r -- "$out" | jget merge.mode) == manual ]] &&
-  [[ $(print -r -- "$out" | jget reply.mode) == draft ]]'
 check "reply send is capped to draft by config.yaml default" '
-  sed "s#repo: acme/my-repo#repo: acme/replytest#; s/needs_review: false/needs_review: false/; s/^  mode: draft/  mode: send/" templates/repo.yaml > "$SIRIUS_HOME/repos/acme__replytest.yaml"
+  sed "s#repo: acme/my-repo#repo: acme/replytest#; s/^  mode: draft/  mode: send/" templates/repo.yaml > "$SIRIUS_HOME/repos/acme__replytest.yaml"
   bin/sirius-config repo acme/replytest | grep -q "reply capped at .draft. by config.yaml"'
 rm -f "$SIRIUS_HOME/repos/acme__replytest.yaml"
 check "reply send allowed when config.yaml also allows send" '
@@ -118,8 +112,8 @@ check "concurrent acquire yields one owner" '
   [[ $(for i in 1 2 3 4 5 6 7 8; do bin/sirius-lease acquire c$i & done 2>/dev/null; wait) == *acquired\"\:\ true* ]] &&
   [[ $(for i in 1 2 3 4 5 6 7 8; do bin/sirius-lease acquire d$i & done 2>/dev/null; wait) != *acquired\"\:\ true* ]]'
 # Title-prefix gates. The template repo is human/manual; "fast" is auto/auto.
+cp templates/repo.yaml "$SIRIUS_HOME/repos/acme__my-repo.yaml"
 sed "s#repo: acme/my-repo#repo: acme/fast#; s/^  gate: human/  gate: auto/; s/^  mode: manual/  mode: auto/" templates/repo.yaml > "$SIRIUS_HOME/repos/acme__fast.yaml"
-sed -i "" "/^needs_review/d" "$SIRIUS_HOME/repos/acme__fast.yaml"
 sed -i "" "s/^reviewer: claude/reviewer: codex/; s/^implement_gate: human/implement_gate: auto/" "$SIRIUS_HOME/config.yaml"
 gt() { g "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"$1\"}}"; }
 check "guard blocks [implement] on a human-gate repo" '! gt "gh issue edit 1 -R acme/my-repo --title \\\"[implement] x\\\""'
