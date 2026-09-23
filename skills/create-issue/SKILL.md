@@ -28,7 +28,7 @@ user-invocable: false
 4. `forbidden` に挙がっている行為を求めるものではない。求めている場合は、その旨を明記した上で `not_actionable` を返す。
 5. 秘密情報や不適切な私的データなしに本文を書ける。
 
-FYIや了解の返事、解決済みの項目、成功の通知、チャットの返信だけで済むものには `not_actionable` を返す。
+FYIや了解の返事、解決済みの項目、成功の通知、チャットの返信だけで済むものには `not_actionable` を返す。チャットの返信だけで済むもの（依頼者が答えを待っている質問、確認、日程調整）のときだけ `reply_only: true` を付け、取り込み側が返信できるようにする。
 
 ## リポジトリ
 
@@ -100,6 +100,7 @@ status: created | duplicate | not_actionable | confirmation_required | blocked
 repo: <owner/repo>
 issue: <number and URL>          # created, duplicate
 reason: <short evidence>         # not_actionable, blocked
+reply_only: <bool>               # not_actionable のとき: チャットの返信だけで済む質問・確認・日程調整なら true
 confirmation_id: <stable id>     # confirmation_required
 question: <one question>
 options: [{value: <choice>, evidence: <why>}]
