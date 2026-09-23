@@ -43,7 +43,6 @@ GLOBAL_DEFAULTS = {
     "merge": "manual",
     "reply": {"mode": "draft"},
     "human_paths": [".github/workflows/"],
-    "identities": {},
     "limits": {"new_issues_per_source": 5, "concurrent_workers": 2},
 }
 
@@ -283,11 +282,6 @@ def resolve(glob, path, data):
     if merge_mode == "auto" and glob["implementer"] == effective_reviewer:
         merge_mode = "manual"
         notes.append("merge auto needs a reviewer model different from the implementer; using 'manual'")
-    ids = glob.get("identities") or {}
-    reviewer_identity = ids.get("reviewer") or {}
-    if merge_mode == "auto" and not (reviewer_identity.get("login") and reviewer_identity.get("gh_config_dir")):
-        merge_mode = "manual"
-        notes.append("merge auto needs identities.reviewer (login, gh_config_dir); using 'manual'")
 
     declared_reply = (data.get("reply") or {}).get("mode", "draft")
     reply_mode = stricter(REPLY_MODES, glob["reply"]["mode"], declared_reply)

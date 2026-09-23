@@ -18,9 +18,9 @@ check "template validates" 'bin/sirius-config validate >/dev/null'
 check "manual ceiling caps auto" '
   sed -i "" "s/^  mode: manual/  mode: auto/" "$SIRIUS_HOME/repos/acme__my-repo.yaml"
   [[ $(bin/sirius-config repo acme/my-repo | jget merge.mode) == manual ]]'
-check "auto without reviewer identity falls back" '
+check "merge ceiling raised to auto is honored" '
   sed -i "" "s/^merge: manual/merge: auto/" "$SIRIUS_HOME/config.yaml"
-  bin/sirius-config repo acme/my-repo | grep -q "needs identities.reviewer"'
+  [[ $(bin/sirius-config repo acme/my-repo | jget merge.mode) == auto ]]'
 check "same implementer and reviewer falls back" '
   sed -i "" "s/^reviewer: codex/reviewer: claude/" "$SIRIUS_HOME/config.yaml"
   bin/sirius-config repo acme/my-repo | grep -q "different from the implementer"'
@@ -121,7 +121,6 @@ check "concurrent acquire yields one owner" '
 sed "s#repo: acme/my-repo#repo: acme/fast#; s/^  gate: human/  gate: auto/; s/^  mode: manual/  mode: auto/" templates/repo.yaml > "$SIRIUS_HOME/repos/acme__fast.yaml"
 sed -i "" "/^needs_review/d" "$SIRIUS_HOME/repos/acme__fast.yaml"
 sed -i "" "s/^reviewer: claude/reviewer: codex/; s/^implement_gate: human/implement_gate: auto/" "$SIRIUS_HOME/config.yaml"
-sed -i "" "s/^identities: {}/identities: {reviewer: {login: bot, gh_config_dir: \/tmp\/x}}/" "$SIRIUS_HOME/config.yaml"
 gt() { g "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"$1\"}}"; }
 check "guard blocks [implement] on a human-gate repo" '! gt "gh issue edit 1 -R acme/my-repo --title \\\"[implement] x\\\""'
 check "guard allows [implement] on an auto-gate repo" 'gt "gh issue create -R acme/fast --title \\\"[implement] x\\\" --body y"'

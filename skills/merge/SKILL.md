@@ -1,11 +1,11 @@
 ---
 name: merge
-description: 各リポジトリのmerge設定に従って、readyになったSiriusのPRを仕上げる - manualなリポジトリには通知し、autoなリポジトリではレビュー用アカウントの判定を投稿してsirius-merge経由でだけマージする。Sirius runスキルから呼ばれるほか、1つのPR向けに単独でも使える。
+description: 各リポジトリのmerge設定に従って、readyになったSiriusのPRを仕上げる - manualなリポジトリには通知し、autoなリポジトリでは独立検証の判定をPRに投稿してsirius-merge経由でだけマージする。Sirius runスキルから呼ばれるほか、1つのPR向けに単独でも使える。
 ---
 
 # マージ
 
-`sirius-merge`（プラグインの `bin/` にある）が、Siriusがマージする唯一の方法。合図はPRタイトル先頭の `[merge]` 接頭辞で、Siriusはラベルを使わない。guard hookが `gh pr merge` とマージAPIを拒否するが、hookはあくまで補助。本当のゲートはGitHub側にある: 今のheadへの承認1件を必須とするルールセットで、承認できるのは別のレビュー用アカウントだけ。
+`sirius-merge`（プラグインの `bin/` にある）が、Siriusがマージする唯一の方法。合図はPRタイトル先頭の `[merge]` 接頭辞で、Siriusはラベルを使わない。guard hookが `gh pr merge` とマージAPIを拒否するが、hookはあくまで補助。本当のゲートは `sirius-merge` 自身の検証にある: 実装役とは別モデル（`implementer`/`reviewer`、またはリポジトリの `review.reviewer`）が検証したPASSの判定コメントと、そのモデルが実装したモデルと重ならないことの確認。GitHub側の承認必須ルールセットは前提にしない（承認アカウントを実装アカウントと分ける運用はしない。詳しくは[README](../../README.md)を参照）。
 
 ## 対象
 
@@ -29,7 +29,7 @@ PRごとに:
    - `audit`: 差分と証跡をIssueの受入条件と突き合わせる;
    - `regression`: baseブランチと比較する。
 
-   さらに対象リポジトリの `verify.commands` があれば実行する。レーンのJSON（検証した `head_sha` と `base_sha`、`lanes`、`verifier_models`、`author_models`、`summary`、契約・金銭・支払い・認証・ストア提出に触れる変更や `forbidden` に触れる変更では `human_only` / `human_only_reason`）を書き、`sirius-merge verdict <repo> <pr> <lanes.json>` を実行する。これがレビュー用アカウントとして判定を投稿し、human-onlyでないPASSにだけ承認する。
+   さらに対象リポジトリの `verify.commands` があれば実行する。レーンのJSON（検証した `head_sha` と `base_sha`、`lanes`、`verifier_models`、`author_models`、`summary`、契約・金銭・支払い・認証・ストア提出に触れる変更や `forbidden` に触れる変更では `human_only` / `human_only_reason`）を書き、`sirius-merge verdict <repo> <pr> <lanes.json>` を実行する。これがPRに判定コメントを投稿する（GitHubのApprove操作は行わない。承認必須のルールセットを前提としないため）。
    判定は、検証したちょうどそのheadと、そのちょうどのbase先端に対してだけ有効。判定とマージの間にbaseへ何かがマージされたら、rebaseして検証し直す。base更新が多いときは、検証とマージを同じ実行の中で終える。
 3. PRタイトルの先頭に `[merge]` を付けて（`gh pr edit <pr> -R <repo> --title "[merge] <title>"`）状態を可視化し、`sirius-merge merge <repo> <pr>` を実行する。これがすべてのチェックを2回実行し、両方が一致したときだけ `--match-head-commit` でsquashマージする。`deploys` に載っているブランチでは、`deploy_workflows` に書かれたワークフローを待ち、失敗したらrevert PRを開く。ワークフローが指定されていなければ、デプロイを未検証として報告し、ユーザーに手で確認するよう求める。
 4. 検証済みのマージの後、GitHubがまだクローズしていなければ元のIssueをクローズし、マージのSHAをコメントする。

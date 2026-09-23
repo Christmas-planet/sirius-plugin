@@ -11,10 +11,12 @@ merge: auto のPRは、レビュー用アカウントの判定と承認がそろ
 規則は ~/.sirius/config.yaml と ~/.sirius/repos/<owner>__<repo>.yaml（sirius-config で解決）、
 停止スイッチは ~/.sirius/STOP、記録は ~/.sirius/logs/merges.tsv。
 
-判定はモデル名ではなく GitHub アカウントで区別する。config.yaml の identities.reviewer が
-実装に使うアカウントと別であり、判定コメントと今の head への Approve がそのアカウントから
-出ていることを確かめる。ブランチのルールセットで承認1件を必須にしておけば、
-このスクリプトを通らない直接のマージも GitHub が止める。
+判定は GitHub アカウントではなくモデル名で区別する。config.yaml の implementer と
+reviewer（または対象リポジトリの review.reviewer）が別モデルであることを sirius-config が
+要求し、判定コメントの verifier_models が実装した author_models と重ならないことを
+このスクリプトが確かめる。GitHub 側の承認必須ルールセットは前提にしない
+（同一アカウントは自分の PR を Approve できないため）: ゲートは判定コメントと
+このスクリプト自身の検証だけにある。
 """
 
 from __future__ import annotations
@@ -55,13 +57,8 @@ class Refused(Exception):
     pass
 
 
-def gh(*args: str, stdin: str | None = None, as_reviewer: bool = False) -> str:
-    env = None
-    if as_reviewer:
-        env = {**os.environ, "GH_CONFIG_DIR": str(Path(reviewer_identity()["gh_config_dir"]).expanduser())}
-        env.pop("GH_TOKEN", None)
-        env.pop("GITHUB_TOKEN", None)
-    result = subprocess.run(["gh", *args], capture_output=True, text=True, input=stdin, env=env)
+def gh(*args: str, stdin: str | None = None) -> str:
+    result = subprocess.run(["gh", *args], capture_output=True, text=True, input=stdin)
     if result.returncode != 0:
         lines = (result.stderr or result.stdout).strip().splitlines()
         raise Refused(f"gh {' '.join(args[:2])}: {lines[-1] if lines else result.returncode}")
@@ -95,14 +92,6 @@ def load_policy(repo: str) -> tuple[dict[str, Any], dict[str, Any] | None]:
         raise Refused("設定にエラーがある: " + " / ".join(errors))
     found = next((r for r in repos if r["repo"] == repo.lower()), None) if repo else None
     return glob, found
-
-
-def reviewer_identity() -> dict[str, Any]:
-    glob, _ = load_policy("")
-    reviewer = (glob.get("identities") or {}).get("reviewer") or {}
-    if not (reviewer.get("login") and reviewer.get("gh_config_dir")):
-        raise Refused("config.yaml の identities.reviewer（login, gh_config_dir）がない")
-    return reviewer
 
 
 def implementer_login() -> str:
@@ -164,15 +153,17 @@ def parse_marker(body: str) -> dict[str, Any] | None:
     return payload if isinstance(payload, dict) else None
 
 
-def latest_verdict(repo: str, number: int, head: str, tip: str, reviewer: str) -> dict[str, Any] | None:
-    """The newest verdict by the reviewer account for exactly this head on exactly this base tip.
+def latest_verdict(repo: str, number: int, head: str, tip: str) -> dict[str, Any] | None:
+    """The newest verdict comment for exactly this head on exactly this base tip.
 
     A verdict for an older head or base is never reused, even with an identical patch-id:
     a rebase changes what the change runs against, so it has to be verified again.
+    verdict_problems() is what actually enforces that the verifying model differs from
+    the implementing one; the account that posted the comment is not the trust boundary.
     """
     found = None
     for comment in api_items(f"repos/{repo}/issues/{number}/comments?per_page=100"):
-        if comment["user"]["login"] != reviewer or MARKER not in comment["body"]:
+        if MARKER not in comment["body"]:
             continue
         payload = parse_marker(comment["body"])
         if payload and payload.get("head_sha") == head and payload.get("base_sha") == tip:
@@ -302,23 +293,15 @@ def evaluate(repo: str, number: int) -> tuple[list[Check], dict[str, Any]]:
         touched = sorted({name for f in files for name in (f["filename"], f.get("previous_filename") or "")
                           if name and name.startswith(guarded)})
         add("人が見るファイル", not touched, ", ".join(touched) or "なし")
-        reviewer = implementer = ""
-        try:
-            reviewer = reviewer_identity()["login"]
-            implementer = implementer_login()
-            add("レビュー用アカウント", reviewer.lower() != implementer.lower(),
-                f"reviewer={reviewer} implementer={implementer}")
-        except Refused as error:
-            add("レビュー用アカウント", False, str(error))
-        add("レビュー用アカウントの承認", reviewer in fresh, f"今のheadへの承認: {', '.join(fresh) or 'なし'}")
+        implementer = implementer_login()
         needed = int(rules.get("approvals", 0))
         if needed:
-            humans = [u for u in fresh if u not in {reviewer, implementer}]
+            humans = [u for u in fresh if u != implementer]
             add("今のheadへの人の承認", len(humans) >= needed, f"{len(humans)}/{needed} {', '.join(humans)}")
         authors = author_models(api_items(f"repos/{repo}/pulls/{number}/commits?per_page=100"))
-        verdict = latest_verdict(repo, number, head, tip, reviewer) if reviewer else None
+        verdict = latest_verdict(repo, number, head, tip)
         if verdict is None:
-            add("独立検証の判定", False, f"{reviewer or 'レビュー用アカウント'} による head {head[:7]}（{base} {tip[:7]} の上）への判定がない")
+            add("独立検証の判定", False, f"head {head[:7]}（{base} {tip[:7]} の上）への判定がない")
         else:
             problems = verdict_problems(verdict, authors)
             add("独立検証の判定", not problems, "; ".join(problems) or f"{verdict['verdict']}（{', '.join(verdict['verifier_models'])}）{verdict['url']}")
@@ -510,15 +493,7 @@ def cmd_verdict(repo: str, number: int, spec_path: Path) -> int:
         "human_only_reason": spec.get("human_only_reason", ""),
         "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
-    reviewer = reviewer_identity()["login"]
-    if gh("api", "user", "--jq", ".login", as_reviewer=True).strip().lower() != reviewer.lower():
-        raise Refused(f"レビュー用の gh 設定が {reviewer} としてログインしていない")
-    if reviewer.lower() == implementer_login().lower():
-        raise Refused("レビュー用アカウントが実装用アカウントと同じ")
-    gh("pr", "comment", str(number), "-R", repo, "--body-file", "-", stdin=render(payload, spec), as_reviewer=True)
-    if verdict in PASSING and not payload["human_only"]:
-        gh("pr", "review", str(number), "-R", repo, "--approve", "--body",
-           f"sirius verdict {verdict} for head {head[:7]}", as_reviewer=True)
+    gh("pr", "comment", str(number), "-R", repo, "--body-file", "-", stdin=render(payload, spec))
     log(repo, number, head, "verdict", f"{verdict} by {', '.join(sorted(verifiers))} patch-id {payload['patch_id']}")
     print(f"判定を投稿した: {verdict} head {head[:7]} patch-id {payload['patch_id']}")
     return 0

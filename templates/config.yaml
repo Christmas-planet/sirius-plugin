@@ -26,9 +26,3 @@ human_paths: [.github/workflows/]
 limits:
   new_issues_per_source: 5
   concurrent_workers: 2
-
-# merge: auto に必須。判定と承認を投稿する、別のGitHubアカウント。
-identities: {}
-#  reviewer:
-#    login: my-review-bot
-#    gh_config_dir: ~/.sirius/identities/reviewer

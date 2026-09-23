@@ -26,9 +26,9 @@ disable-model-invocation: true
    - Slack: 正確なワークスペースID（`T…`）とチャンネルID（`C…`）。Slackコネクタが使えるときは、ユーザーが選べるようチャンネル一覧を出す。名前やワイルドカードは対象にならない。
    - LINE: アプリに表示されている通りの正確なチャット名（このMacだけ）。
    - `implement.gate`: `human` は人がIssueタイトルの先頭に `[implement]` を付けてからSiriusが実装することを意味する。`auto` は、受入条件がはっきりしているIssueにSirius自身が作成時から接頭辞を付けることを意味する。
-   - `merge.mode`: `manual` は人がreadyなPRのタイトル先頭に `[merge]` を付け、その後Siriusがマージすることを意味する。`auto` は、レビュー用アカウントの判定、承認、CI、baseブランチの条件がすべて揃ったときにSiriusがマージすることを意味する。
-   - `reply.mode`: `draft` はSiriusが送信せず提案文をIssue/レポートに書くだけ。`send` はSiriusが実際に返信する。LINEには送信の仕組みがないので、`reply.mode: send` を選んでもLINE向けの返信は当面Issue/レポートへの記載にとどまる。
-   - `merge` の下の各種ルール: `ci_required`、`approvals`（レビュー用アカウントに加えて必要な人の承認数）、`human_branches`（ブランチ→理由、`*` は全ブランチ）、`deploys`（ブランチ→そのマージが何をデプロイするか）、`deploy_workflows`（ブランチ→デプロイを行うActionsワークフロー名）。
+   - `merge.mode`: `manual` は人がreadyなPRのタイトル先頭に `[merge]` を付け、その後Siriusがマージすることを意味する。`auto` は、実装役とは別モデルによる独立検証の判定（PASS）、CI、baseブランチの条件がすべて揃ったときにSiriusがマージすることを意味する。承認は同一GitHubアカウントで行い、別のレビュー用アカウントは使わない。
+   - `reply.mode`: `draft` はSiriusが送信せず提案文をIssue/レポートに書くだけ。`send` はSiriusが実際に返信する（Slackは `slack_send_message`、LINEはComputer Useでのアプリ操作）。返信の文面は「Issueを起票/追記しました」という固定テンプレートで、メッセージの内容に応じて変わらない。
+   - `merge` の下の各種ルール: `ci_required`、`approvals`（独立検証の判定に加えて必要な人の承認数）、`human_branches`（ブランチ→理由、`*` は全ブランチ）、`deploys`（ブランチ→そのマージが何をデプロイするか）、`deploy_workflows`（ブランチ→デプロイを行うActionsワークフロー名）。
    - `investigate` / `review` / `verify` / `forbidden`: どこまで埋めるかはユーザーに委ねる。分からない・決めていないものは空のままにしてよいと伝える。
 4. [テンプレート](../../templates/repo.yaml)から `~/.sirius/repos/<owner>__<repo>.yaml`（`owner/repo` を小文字化し `/` を `__` に置き換えたファイル名）を書き、`dir` を現在のディレクトリに設定する。
 5. `sirius-config validate` を実行し、`downgrades` を含めて実効結果を見せる。
@@ -48,19 +48,10 @@ Siriusはラベルを作らない。状態はタイトル接頭辞の `[implemen
 
 **いずれかのリポジトリが `merge.mode: auto` を使うとき**
 
-1. レビュー専用の別GitHubアカウント（マシンユーザー）を作り、対象リポジトリへの書き込み権限を与える。エージェントが使うアカウントと同じであってはならない。
-2. 専用の gh 設定ディレクトリでログインする:
-   ```bash
-   GH_CONFIG_DIR=~/.sirius/identities/reviewer gh auth login
-   ```
-3. `config.yaml` に追加する:
-   ```yaml
-   identities:
-     reviewer: {login: <account>, gh_config_dir: ~/.sirius/identities/reviewer}
-   ```
-4. 各リポジトリのデフォルトブランチに、承認1件を必須とし、pushで古い承認を無効化し、最新のpushへの承認を必須とするルールセットを追加する。これが無いと、ゲートはSirius自身のツールだけで守られることになる。正確な `gh api` コマンドか設定ページのURLを示す。
+別のレビュー用GitHubアカウントは使わない運用（セルフマージ）を選んでいる。ゲートは `sirius-merge` 自身の検証だけにある: 実装役とは別モデル（`implementer`/`reviewer`、またはリポジトリの `review.reviewer`）による独立検証がPASSした判定コメントが、今のheadと今のbase先端に対して揃っていることを確かめてからマージする。GitHub側の承認必須ルールセットは設定しない（設定していても、同一アカウントは自分のPRをApproveできずGitHub APIに拒否されるため、Approve自体は行わない）。
 
-1〜3が済むまで、`sirius-config` はそれらのリポジトリを `manual` として報告する。
+- `config.yaml` の `implementer` と `reviewer`（またはリポジトリの `review.reviewer`）が異なるモデルになっていることを確認する。`sirius-config` はここが同じだと自動的に `manual` へ降格する。
+- 検証レーンをすり抜けられると困る変更（本番公開、支払い、認証情報など）は、リポジトリの `forbidden` に書いておく。レビュワーがこれに触れる変更を見つけたら `human_only` として扱い、`sirius-merge verdict` はその判定をマージに使わせない。
 
 **スケジューラ `launchd`**
 

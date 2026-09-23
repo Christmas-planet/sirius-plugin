@@ -118,7 +118,6 @@ def main():
             "implement_gate": "auto",
             "merge": "auto",
             "human_paths": policy.get("human_paths", [".github/workflows/"]),
-            "identities": {},
         })
         if write:
             cfg.write_text(body, encoding="utf-8")
