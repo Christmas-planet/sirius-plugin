@@ -103,6 +103,9 @@ Sirius rules override poteto-mode wherever they conflict:
   verify.deploy says how. Production deploys, terraform apply, and other
   cloud writes outside those deploys stay forbidden.
 - Use local subagents for verification and review; do not require cloud agents.
+- Never print secret values. To see what an env file holds, print key names
+  only (`cut -d= -f1 <file>`); do not mask values with sed or grep patterns,
+  which miss quoted or multi-line values and leak them.
 
 Read investigate.read_first and investigate.knowledge before anything else.
 Follow implement.conventions. Verify against the real artifact: run every
