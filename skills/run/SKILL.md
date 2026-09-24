@@ -21,7 +21,7 @@ description: Siriusの1サイクルを実行する - readyなPRのマージ、�
 
 LINE取り込みだけは追加で別扱いにする。ネイティブmacOS LINEアプリを操作するComputer Useセッションは機械に1つしかないので、`intake-line` を呼ぶ前に `sirius-lease acquire <run-id> --scope line` を取り、そのフェーズが終わったら解放する。他の実行がすでに `line` スコープを持っていたら、この実行のLINE取り込みだけをスキップし、（`repo:<owner/repo>` を取れている）他のリポジトリのSlack取り込みやマージ・実装は続ける。
 
-保持している各リースについて、フェーズごとに `sirius-lease heartbeat <run-id> --scope <same-scope>` を実行する。台帳は `~/.sirius/runs/<run-id>.json` に保つ: ID、ハッシュ、範囲、カーソル、URL、件数、時刻だけ。メッセージ本文、秘密情報、リポジトリの内容は絶対に保存しない。
+保持している各リースについて、フェーズごとに `sirius-lease heartbeat <run-id> --scope <same-scope>` を実行する。台帳は `~/.sirius/runs/<run-id>.json` に保つ: ID、ハッシュ、範囲、カーソル、URL、件数、時刻だけ。メッセージ本文、秘密情報、リポジトリの内容は絶対に保存しない。秘密情報はツール出力にも出さない: `.env` などの中身を確かめるときはキー名だけを表示し（`cut -d= -f1`）、sedやgrepの正規表現で値をマスクして表示しない。引用符付きや複数行の値はパターンから漏れ、そのまま出力される。出てしまったら、その値は漏えいしたものとして扱い、再発行を運用者に報告する。
 
 リースは機械単位。同じキューに対して使えるスケジューラ（`config.yaml` の `scheduler`）は1つだけ。
 
